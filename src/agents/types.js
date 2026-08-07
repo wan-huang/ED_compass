@@ -1,0 +1,31 @@
+/**
+ * ED COMPASS - Agent Architecture Types & Interfaces
+ * Academic Prototype for EMHI1001H
+ */
+
+export const AgentVersion = {
+  INTAKE: 'intake-v1.0',
+  NAVIGATION: 'navigation-v1.0',
+  FEEDBACK: 'feedback-v1.0'
+};
+
+export const FeedbackTheme = {
+  CLARITY: 'CLARITY',
+  SAFETY_CONCERN: 'SAFETY_CONCERN',
+  QUESTION_ORDER: 'QUESTION_ORDER',
+  SAFETY_NET_MISSING: 'SAFETY_NET_MISSING',
+  DISPOSITION_FEEDBACK: 'DISPOSITION_FEEDBACK',
+  GENERAL_POSITIVE: 'GENERAL_POSITIVE',
+  OTHER: 'OTHER'
+};
+
+export const ImprovementStatus = {
+  NEW: 'NEW',
+  UNDER_REVIEW: 'UNDER_REVIEW',
+  CLINICAL_REVIEW: 'CLINICAL_REVIEW',
+  APPROVED_FOR_TESTING: 'APPROVED_FOR_TESTING',
+  TESTING: 'TESTING',
+  APPROVED: 'APPROVED',
+  IMPLEMENTED: 'IMPLEMENTED',
+  REJECTED: 'REJECTED'
+};

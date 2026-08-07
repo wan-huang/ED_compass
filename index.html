@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ED COMPASS - Governed Digital Front Door for Emergency Care Navigation</title>
+  <meta name="description" content="ED Compass is an academic prototype for emergency care navigation built for University of Toronto EMHI1001H. Features a versioned deterministic clinical rule engine paired with a 3-agent safety architecture.">
+  
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="src/css/styles.css">
+</head>
+<body>
+
+  <!-- Main Application Container -->
+  <div id="app"></div>
+
+  <!-- ES6 Module Scripts -->
+  <script type="module">
+    import { AppController } from './src/ui/app.js';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      window.app = new AppController(document.getElementById('app'));
+    });
+  </script>
+</body>
+</html>
