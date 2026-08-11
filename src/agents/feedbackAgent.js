@@ -17,10 +17,15 @@ export class FeedbackAgent {
    * Process patient feedback submission and classify themes & safety concerns.
    */
   static processPatientFeedback(sessionId, scenario, ruleResult, feedbackForm) {
-    const clarityScore = Number(feedbackForm.clarityScore) || 5;
-    const confidenceScore = Number(feedbackForm.confidenceScore) || 5;
+    const clarityScore = normalizeScore(feedbackForm.clarityScore);
+    const trustScore = normalizeScore(feedbackForm.trustScore);
+    const confidenceScore = normalizeScore(feedbackForm.confidenceScore);
+    const helpful = feedbackForm.helpful !== false;
     const isNextStepClear = feedbackForm.isNextStepClear !== false;
     const knowsEscalation = feedbackForm.knowsEscalation !== false;
+    const canFollow = feedbackForm.canFollow || 'yes';
+    const accessBarrier = feedbackForm.accessBarrier || '';
+    const unsafeConcern = feedbackForm.unsafeConcern === true;
     const comments = feedbackForm.comments || '';
     const confusingItems = feedbackForm.confusingItems || '';
 
@@ -28,7 +33,15 @@ export class FeedbackAgent {
     const classifiedTheme = classifyTheme(clarityScore, isNextStepClear, knowsEscalation, confusingItems, comments);
 
     // Identify if safety concern exists
-    const isSafetyConcern = checkSafetyConcern(clarityScore, confidenceScore, knowsEscalation, comments, confusingItems);
+    const isSafetyConcern = checkSafetyConcern(
+      clarityScore,
+      confidenceScore,
+      knowsEscalation,
+      unsafeConcern,
+      comments,
+      confusingItems
+    );
+    const feedbackStream = isSafetyConcern ? 'SAFETY_SURVEILLANCE' : 'PATIENT_EXPERIENCE';
 
     return {
       agentVersion: AgentVersion.FEEDBACK,
@@ -39,9 +52,14 @@ export class FeedbackAgent {
       ruleVersion: ruleResult.ruleVersion,
       patientFeedback: {
         clarityScore,
+        trustScore,
         confidenceScore,
+        helpful,
         isNextStepClear,
         knowsEscalation,
+        canFollow,
+        accessBarrier,
+        unsafeConcern,
         confusingItems,
         comments,
         submittedAt: new Date().toISOString()
@@ -49,6 +67,7 @@ export class FeedbackAgent {
       qualityAnalysis: {
         classifiedTheme,
         isSafetyConcern,
+        feedbackStream,
         summary: generateFeedbackSummary(classifiedTheme, isSafetyConcern, clarityScore)
       }
     };
@@ -116,12 +135,19 @@ function classifyTheme(clarity, nextStepClear, knowsEscalation, confusingItems, 
   return FeedbackTheme.OTHER;
 }
 
-function checkSafetyConcern(clarity, confidence, knowsEscalation, comments, confusingItems) {
+function checkSafetyConcern(clarity, confidence, knowsEscalation, unsafeConcern, comments, confusingItems) {
   const text = `${confusingItems} ${comments}`.toLowerCase();
+  if (unsafeConcern) return true;
   if (!knowsEscalation) return true;
   if (clarity <= 2 && confidence <= 2) return true;
-  if (text.includes('unsafe') || text.includes('severe pain') || text.includes('delayed')) return true;
+  if (/\b(unsafe|danger|dangerous|emergency|911|9-1-1|worsening|getting worse|severe pain|delayed|wrong)\b/.test(text)) return true;
   return false;
+}
+
+function normalizeScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 5;
+  return Math.min(5, Math.max(1, numeric));
 }
 
 function generateFeedbackSummary(theme, isSafety, clarity) {

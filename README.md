@@ -14,6 +14,18 @@
 
 ED Compass complements—and does NOT replace—existing services such as **911**, **HealthLink BC 8-1-1**, **HEiDi**, **Emergency Care BC RTVS**, local emergency departments, and urgent/primary care clinics.
 
+### No-Wrong-Door Demonstration Strategy (v1.1)
+
+The prototype now begins with **“Tell us what is happening”** rather than requiring the patient to know which clinical pathway or healthcare service to choose. For the classroom demonstration, narrative keyword routing recognizes the three supported concerns and then hands the patient to the governed pathway.
+
+The live experience is designed to show:
+
+1. A patient or caregiver being heard in plain language.
+2. Agent 1 creating structured facts.
+3. A deterministic rule assigning the care level.
+4. Agent 2 turning the rule into a practical care-channel plan.
+5. Agent 3 sending patient and provider feedback into a synthetic learning dashboard.
+
 > ⚠️ **ACADEMIC DISCLAIMER:** This software is an academic prototype built exclusively for the EMHI1001H course at the University of Toronto. It is **NOT** a production clinical system and must **NOT** be used to diagnose patients or make actual clinical decisions. All external handoffs display: `"Conceptual handoff only—no information has been transmitted."`
 
 ---
@@ -96,31 +108,36 @@ Proposals follow a strict governed lifecycle:
 ### Option A: Local Dev HTTP Server (Recommended)
 Launch the local web server:
 ```bash
-python3 -m http.server 8080
+npm run serve
 ```
 Open your browser and navigate to:
 ```
 http://localhost:8080/
 ```
 
-### Option B: Direct Browser View
-Double click `index.html` or open the file path directly in any modern browser (Chrome, Safari, Firefox, Edge).
-
 ---
 
 ## 7. How to Run Automated Tests
 
-Run the Python unit test suite:
+Run the JavaScript integration tests against the production modules:
+```bash
+npm test
+```
+
+The original mirrored Python rule tests remain available:
 ```bash
 python3 tests/test_engine.py
 ```
-This executes **21 automated test cases** testing:
+Together these verify:
 * Emergency presentations across all 3 pathways
 * Lower-risk self-care presentations
 * Tetanus immunization & rust zero-weight rule logic
 * High-risk host (chemotherapy) escalation without CTAS/qSOFA
 * Missing fields & "I am not sure" conservative handling
 * Agent safety boundary enforcement (Agent 1/2/3 restrictions)
+* Narrative demo flow, feedback persistence, staff review, dashboard and architecture rendering
+* Rust having zero independent decision weight
+* Conservative handling of uncertain safety-critical answers
 
 ---
 
@@ -132,7 +149,8 @@ Use the built-in **⚡ DEMO QUICK LAUNCH** buttons at the top of the application
 2. **Demo B (Headache Emergency)**: Click `Demo B`. Patient reports sudden thunderclap onset. Demonstrates early emergency stop, bypassing remaining questions, and showing immediate 911 red warning card.
 3. **Demo C (Lower-Risk Fever)**: Click `Demo C`. Stable adult with 24h fever drinking fluids well. Demonstrates concise screening, home monitoring disposition, and safety-net triggers.
 4. **Demo D (High-Risk Fever)**: Click `Demo D`. Chemotherapy patient with fever. Demonstrates host-risk escalation to Emergency Department without prompting for CTAS/qSOFA scores.
-5. **Staff Dashboard Review**: Click `Staff Dashboard` tab to review synthetic metrics, open an encounter drawer, submit a staff review, and launch a QI Improvement Proposal.
+5. **Staff Dashboard Review**: Submit patient feedback, open the Learning System Dashboard, review the new encounter, submit a provider review, and launch a QI Improvement Proposal.
+6. **Architecture Close**: Open `How It Works` to show the patient-facing, safety, conceptual-routing, synthetic-data and human-governance boundaries.
 
 ---
 
@@ -141,6 +159,7 @@ Use the built-in **⚡ DEMO QUICK LAUNCH** buttons at the top of the application
 ```
 AG_ED-Compass/
 ├── index.html                    # Main HTML Entry Point
+├── package.json                  # Local serve and JavaScript test commands
 ├── README.md                     # Comprehensive Academic & Technical Guide
 ├── src/
 │   ├── css/
@@ -167,14 +186,17 @@ AG_ED-Compass/
 │   └── ui/
 │       └── app.js                # Single-Page Reactive Application Controller
 └── tests/
-    └── test_engine.py            # Automated Unit Test Suite (21 Tests)
+    ├── prototype.test.mjs        # Tests the actual JavaScript modules and demo flow
+    └── test_engine.py            # Original mirrored Python rule tests
 ```
 
 ---
 
 ## 10. Known Limitations & Outstanding TODOs
 * **Local Browser Storage**: Classroom prototype uses local storage for synthetic data persistence; production deployment would connect to a secure cloud database.
-* **LLM Provider**: Uses `LocalDemoAgentProvider` by default for zero-dependency offline execution. Future integration with `FutureLLMProvider` requires API key configuration.
+* **Narrative routing**: Classroom keyword routing supports only nail puncture, headache and fever. It is not a general-purpose symptom interpreter.
+* **Synthetic service options**: Clinic availability, opening hours and wait times are not verified or connected to a live service directory.
+* **Local demo provider**: Uses `LocalDemoAgentProvider` for a reliable offline classroom demonstration; no browser-exposed API key or runtime language model is required.
 
 ---
 

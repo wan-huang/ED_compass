@@ -23,12 +23,13 @@ export const DEMO_CASES = [
       numbnessOrCirculationIssue: false,
       objectEmbedded: false,
       deepPenetration: true,
-      grossContamination: true, // Rusty nail
+      grossContamination: false,
+      isRusty: true, // Context only: deliberately ignored by the rules engine
       worseningPainOrSwelling: false,
       highRiskHost: false,
       tetanusStatus: 'over_5_years'
     },
-    teachingPoint: 'The clinical engine routes to Same-Day Assessment based on wound depth & outdated tetanus history (>5 yrs). The rusty condition is recorded but has ZERO independent decision weight.'
+    teachingPoint: 'The clinical engine routes to Same-Day Assessment based on wound depth and outdated tetanus history. Rust is recorded for context but has ZERO independent decision weight.'
   },
   {
     id: 'DEMO_B',

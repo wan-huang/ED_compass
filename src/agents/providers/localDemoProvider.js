@@ -17,8 +17,8 @@ export class LocalDemoAgentProvider {
     this.isOfflineCapable = true;
   }
 
-  createIntakeSession(sessionId, scenario) {
-    return IntakeAgent.createSession(sessionId, scenario);
+  createIntakeSession(sessionId, scenario, narrative = '') {
+    return IntakeAgent.createSession(sessionId, scenario, narrative);
   }
 
   processAnswer(sessionState, fieldId, value, isUnsure = false) {
@@ -26,7 +26,12 @@ export class LocalDemoAgentProvider {
   }
 
   generateHandoff(sessionState) {
-    return IntakeAgent.buildHandoff(sessionState);
+    const handoff = IntakeAgent.buildHandoff(sessionState);
+    const validation = ClinicalRuleEngine.validateHandoff(handoff);
+    if (!validation.isValid) {
+      throw new Error(`Invalid intake handoff: ${validation.errors.join('; ')}`);
+    }
+    return handoff;
   }
 
   evaluateClinicalRules(scenario, facts) {

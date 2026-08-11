@@ -32,7 +32,10 @@ const SEEDED_ENCOUNTERS = [
     },
     patientFeedback: {
       clarityScore: 5,
+      trustScore: 5,
       confidenceScore: 5,
+      canFollow: 'yes',
+      accessBarrier: '',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: '',
@@ -41,7 +44,8 @@ const SEEDED_ENCOUNTERS = [
     },
     feedbackAnalysis: {
       classifiedTheme: FeedbackTheme.GENERAL_POSITIVE,
-      isSafetyConcern: false
+      isSafetyConcern: false,
+      feedbackStream: 'PATIENT_EXPERIENCE'
     },
     staffReview: {
       status: 'COMPLETED',
@@ -59,7 +63,7 @@ const SEEDED_ENCOUNTERS = [
     disposition: Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
     ruleId: 'NAIL-U01',
     ruleVersion: '1.0',
-    answers: { deepPenetration: true, grossContamination: true, tetanusStatus: 'over_5_years' },
+    answers: { deepPenetration: true, grossContamination: false, isRusty: true, tetanusStatus: 'over_5_years' },
     ruleResult: {
       disposition: Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
       ruleId: 'NAIL-U01',
@@ -70,7 +74,10 @@ const SEEDED_ENCOUNTERS = [
     },
     patientFeedback: {
       clarityScore: 4,
+      trustScore: 4,
       confidenceScore: 4,
+      canFollow: 'yes',
+      accessBarrier: '',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: 'Was wondering if rust meant I automatically had tetanus.',
@@ -79,7 +86,8 @@ const SEEDED_ENCOUNTERS = [
     },
     feedbackAnalysis: {
       classifiedTheme: FeedbackTheme.CLARITY,
-      isSafetyConcern: false
+      isSafetyConcern: false,
+      feedbackStream: 'PATIENT_EXPERIENCE'
     },
     staffReview: {
       status: 'COMPLETED',
@@ -108,7 +116,10 @@ const SEEDED_ENCOUNTERS = [
     },
     patientFeedback: {
       clarityScore: 5,
+      trustScore: 5,
       confidenceScore: 5,
+      canFollow: 'yes',
+      accessBarrier: '',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: '',
@@ -117,7 +128,8 @@ const SEEDED_ENCOUNTERS = [
     },
     feedbackAnalysis: {
       classifiedTheme: FeedbackTheme.GENERAL_POSITIVE,
-      isSafetyConcern: false
+      isSafetyConcern: false,
+      feedbackStream: 'PATIENT_EXPERIENCE'
     },
     staffReview: {
       status: 'PENDING'
@@ -141,7 +153,10 @@ const SEEDED_ENCOUNTERS = [
     },
     patientFeedback: {
       clarityScore: 4,
+      trustScore: 5,
       confidenceScore: 5,
+      canFollow: 'maybe',
+      accessBarrier: 'transportation',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: 'None',
@@ -150,7 +165,8 @@ const SEEDED_ENCOUNTERS = [
     },
     feedbackAnalysis: {
       classifiedTheme: FeedbackTheme.GENERAL_POSITIVE,
-      isSafetyConcern: false
+      isSafetyConcern: false,
+      feedbackStream: 'PATIENT_EXPERIENCE'
     },
     staffReview: {
       status: 'COMPLETED',
@@ -179,7 +195,10 @@ const SEEDED_ENCOUNTERS = [
     },
     patientFeedback: {
       clarityScore: 2,
+      trustScore: 2,
       confidenceScore: 2,
+      canFollow: 'maybe',
+      accessBarrier: 'transportation',
       isNextStepClear: false,
       knowsEscalation: false,
       confusingItems: 'Felt a bit panicked by the urgent red box.',
@@ -188,7 +207,8 @@ const SEEDED_ENCOUNTERS = [
     },
     feedbackAnalysis: {
       classifiedTheme: FeedbackTheme.SAFETY_CONCERN,
-      isSafetyConcern: true
+      isSafetyConcern: true,
+      feedbackStream: 'SAFETY_SURVEILLANCE'
     },
     staffReview: {
       status: 'PENDING'
@@ -318,9 +338,15 @@ export class SyntheticStore {
         emergencyEscalationRate: '0%',
         completionRate: '100%',
         avgClarity: '5.0',
+        avgTrust: '5.0',
         avgConfidence: '5.0',
+        canFollowRate: 'N/A',
         staffAgreementRate: '100%',
         safetyConcernCount: 0,
+        patientExperienceCount: 0,
+        communityCount: 0,
+        communityNavigationRate: '0%',
+        barrierCounts: {},
         openImprovementItems: 0
       };
     }
@@ -351,6 +377,15 @@ export class SyntheticStore {
       ? (feedbackEncounters.reduce((acc, e) => acc + (e.patientFeedback.confidenceScore || 0), 0) / feedbackEncounters.length).toFixed(1)
       : 'N/A';
 
+    const avgTrust = feedbackEncounters.length > 0
+      ? (feedbackEncounters.reduce((acc, e) => acc + (e.patientFeedback.trustScore || 0), 0) / feedbackEncounters.length).toFixed(1)
+      : 'N/A';
+
+    const followable = feedbackEncounters.filter(e => e.patientFeedback.canFollow === 'yes');
+    const canFollowRate = feedbackEncounters.length > 0
+      ? `${Math.round((followable.length / feedbackEncounters.length) * 100)}%`
+      : 'N/A';
+
     const reviewed = encounters.filter(e => e.staffReview && e.staffReview.status === 'COMPLETED');
     const agreed = reviewed.filter(e => e.staffReview.dispositionAppropriate === 'YES');
     const staffAgreementRate = reviewed.length > 0
@@ -358,6 +393,19 @@ export class SyntheticStore {
       : '100%';
 
     const safetyConcernCount = encounters.filter(e => e.feedbackAnalysis?.isSafetyConcern === true).length;
+    const patientExperienceCount = encounters.filter(e => e.feedbackAnalysis?.feedbackStream !== 'SAFETY_SURVEILLANCE').length;
+    const communityCount = encounters.filter(e => [
+      Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
+      Disposition.CONTACT_811_OR_PRIMARY_CARE,
+      Disposition.HOME_MONITOR_WITH_SAFETY_NET
+    ].includes(e.disposition)).length;
+    const communityNavigationRate = `${Math.round((communityCount / total) * 100)}%`;
+
+    const barrierCounts = {};
+    feedbackEncounters.forEach(e => {
+      const barrier = e.patientFeedback.accessBarrier;
+      if (barrier) barrierCounts[barrier] = (barrierCounts[barrier] || 0) + 1;
+    });
     const openImprovementItems = improvements.filter(i => i.status !== ImprovementStatus.IMPLEMENTED && i.status !== ImprovementStatus.REJECTED).length;
 
     return {
@@ -368,9 +416,15 @@ export class SyntheticStore {
       emergencyEscalationRate,
       completionRate: '98%',
       avgClarity,
+      avgTrust,
       avgConfidence,
+      canFollowRate,
       staffAgreementRate,
       safetyConcernCount,
+      patientExperienceCount,
+      communityCount,
+      communityNavigationRate,
+      barrierCounts,
       openImprovementItems
     };
   }

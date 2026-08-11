@@ -17,8 +17,9 @@ export class AppController {
     this.provider = getAgentProvider();
     
     // Application State
-    this.activeTab = 'patient'; // 'patient' | 'staff' | 'improvements'
-    this.patientStep = 'landing'; // 'landing' | 'consent' | 'scenario_select' | 'intake' | 'emergency_stop' | 'review' | 'disposition' | 'feedback' | 'complete'
+    this.activeTab = 'patient'; // 'patient' | 'staff' | 'improvements' | 'architecture'
+    this.patientStep = 'landing'; // 'landing' | 'consent' | 'concern_input' | 'intake' | 'emergency_stop' | 'review' | 'disposition' | 'complete'
+    this.narrativeError = '';
     
     // Intake Session State
     this.currentSession = null;
@@ -66,14 +67,33 @@ export class AppController {
 
   acceptConsent() {
     AuditLogger.logEvent(AuditEventType.CONSENT_GIVEN, 'NEW_SESSION', { consent: true });
-    this.patientStep = 'scenario_select';
+    this.patientStep = 'concern_input';
     this.render();
   }
 
-  selectScenario(scenario) {
+  submitConcernNarrative(narrative) {
+    const cleaned = String(narrative || '').trim();
+    const normalized = cleaned.toLowerCase();
+    let scenario = null;
+
+    if (/\b(nail|puncture|sharp object|stepped on)\b/.test(normalized)) scenario = Scenario.NAIL_PUNCTURE;
+    else if (/\b(headache|head pain|migraine|thunderclap)\b/.test(normalized)) scenario = Scenario.HEADACHE;
+    else if (/\b(fever|temperature|chills|feverish)\b/.test(normalized)) scenario = Scenario.FEVER;
+
+    if (!scenario) {
+      this.narrativeError = 'For this classroom prototype, please describe a nail puncture, headache, or fever.';
+      this.render();
+      return;
+    }
+
+    this.narrativeError = '';
+    this.selectScenario(scenario, cleaned);
+  }
+
+  selectScenario(scenario, narrative = '') {
     const sessionId = `EDC-${Date.now().toString().slice(-6)}`;
-    this.currentSession = this.provider.createIntakeSession(sessionId, scenario);
-    AuditLogger.logEvent(AuditEventType.SCENARIO_SELECTED, sessionId, { scenario });
+    this.currentSession = this.provider.createIntakeSession(sessionId, scenario, narrative);
+    AuditLogger.logEvent(AuditEventType.SCENARIO_SELECTED, sessionId, { scenario, narrative });
     this.patientStep = 'intake';
     this.render();
   }
@@ -114,6 +134,10 @@ export class AppController {
     this.currentNavigation = this.provider.generateNavigation(this.currentHandoff, this.currentRuleResult);
     AuditLogger.logEvent(AuditEventType.RECOMMENDATION_DISPLAYED, this.currentHandoff.sessionId, { disposition: this.currentRuleResult.disposition });
 
+    // Persist the recommendation immediately. Emergency encounters therefore
+    // reach the learning dashboard even if the patient does not submit feedback.
+    this.persistCurrentEncounter();
+
     if (!this.currentSession.emergencyStopDetected) {
       this.patientStep = 'disposition';
     }
@@ -132,25 +156,38 @@ export class AppController {
 
     AuditLogger.logEvent(AuditEventType.PATIENT_FEEDBACK_SUBMITTED, this.currentSession.sessionId, { feedback: feedbackForm });
 
-    // Save encounter to synthetic store
+    this.persistCurrentEncounter({
+      patientFeedback: this.currentFeedbackAnalysis.patientFeedback,
+      feedbackAnalysis: this.currentFeedbackAnalysis.qualityAnalysis,
+      completionStatus: 'COMPLETED'
+    });
+    this.patientStep = 'complete';
+    this.render();
+  }
+
+  persistCurrentEncounter(extra = {}) {
+    if (!this.currentSession || !this.currentRuleResult || !this.currentHandoff) return;
     const encounter = {
       sessionId: this.currentSession.sessionId,
       scenario: this.currentSession.scenario,
+      narrative: this.currentSession.narrative || '',
       disposition: this.currentRuleResult.disposition,
       ruleId: this.currentRuleResult.ruleId,
       ruleVersion: this.currentRuleResult.ruleVersion,
       answers: this.currentHandoff.answers,
       ruleResult: this.currentRuleResult,
       navigation: this.currentNavigation,
-      patientFeedback: this.currentFeedbackAnalysis.patientFeedback,
-      feedbackAnalysis: this.currentFeedbackAnalysis.qualityAnalysis,
       staffReview: { status: 'PENDING' },
+      completionStatus: 'RECOMMENDATION_DISPLAYED',
+      agentVersions: {
+        intake: this.currentHandoff.agentVersion,
+        navigation: this.currentNavigation?.agentVersion,
+        feedback: this.currentFeedbackAnalysis?.agentVersion || null
+      },
+      ...extra,
       createdAt: new Date().toISOString()
     };
-
     SyntheticStore.saveEncounter(encounter);
-    this.patientStep = 'complete';
-    this.render();
   }
 
   launchDemoCase(demoId) {
@@ -158,7 +195,7 @@ export class AppController {
     if (!demo) return;
 
     const sessionId = `DEMO-${demo.id}-${Date.now().toString().slice(-4)}`;
-    let session = this.provider.createIntakeSession(sessionId, demo.scenario);
+    let session = this.provider.createIntakeSession(sessionId, demo.scenario, demo.description);
     
     // Pre-populate answers
     Object.entries(demo.presetAnswers).forEach(([key, val]) => {
@@ -210,6 +247,28 @@ export class AppController {
     }
   }
 
+  setDashboardFilter(name, value) {
+    if (Object.prototype.hasOwnProperty.call(this.dashboardFilters, name)) {
+      this.dashboardFilters[name] = value;
+      this.render();
+    }
+  }
+
+  resetDemoData() {
+    SyntheticStore.resetToDefaults();
+    AuditLogger.clearLogs();
+    this.activeModal = null;
+    this.selectedEncounterId = null;
+    this.dashboardFilters = { scenario: 'ALL', disposition: 'ALL', safetyFlag: 'ALL', reviewStatus: 'ALL' };
+    this.render();
+  }
+
+  changeImprovementStatus(improvementId, status) {
+    SyntheticStore.updateImprovementStatus(improvementId, status, 'Demonstration governance transition');
+    AuditLogger.logEvent(AuditEventType.IMPROVEMENT_STATUS_CHANGED, improvementId, { status }, 'Staff');
+    this.render();
+  }
+
   // --- RENDERING VIEWS ---
 
   render() {
@@ -221,6 +280,8 @@ export class AppController {
       mainContentHtml = this.renderStaffDashboard();
     } else if (this.activeTab === 'improvements') {
       mainContentHtml = this.renderGovernanceView();
+    } else if (this.activeTab === 'architecture') {
+      mainContentHtml = this.renderArchitectureView();
     }
 
     const html = `
@@ -243,11 +304,14 @@ export class AppController {
             <button class="nav-tab ${this.activeTab === 'improvements' ? 'active' : ''}" onclick="window.app.setTab('improvements')">
               Governance QI (${SyntheticStore.calculateMetrics().openImprovementItems})
             </button>
+            <button class="nav-tab ${this.activeTab === 'architecture' ? 'active' : ''}" onclick="window.app.setTab('architecture')">
+              How It Works
+            </button>
           </nav>
         </div>
         <div class="academic-banner">
           <span class="academic-badge">Academic Prototype</span>
-          <span>University of Toronto EMHI1001H Project &bull; NOT a production clinical system &bull; Does NOT diagnose patients</span>
+          <span>University of Toronto EMHI1001H Project &bull; Does NOT diagnose patients &bull; For a life-threatening emergency, call 911</span>
         </div>
       </header>
 
@@ -351,36 +415,32 @@ export class AppController {
           </div>
         `;
 
-      case 'scenario_select':
+      case 'concern_input':
         return `
           <div class="container-narrow">
-            <h2 style="font-family: var(--font-heading); font-size: 1.75rem; margin-bottom: 0.5rem;">Select What You Are Experiencing</h2>
-            <p style="color: var(--color-text-muted); margin-bottom: 1.5rem;">Choose the scenario that best matches your primary concern:</p>
+            <div class="eyebrow">NO WRONG DOOR</div>
+            <h2 style="font-family: var(--font-heading); font-size: 1.9rem; margin-bottom: 0.5rem;">Tell us what is happening</h2>
+            <p style="color: var(--color-text-muted); margin-bottom: 1.5rem;">You do not need to know which healthcare service to choose before asking for help.</p>
 
-            <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <div class="card card-interactive" onclick="window.app.selectScenario('${Scenario.NAIL_PUNCTURE}')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                  <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--color-primary-dark);">🦶 Stepped on a Nail / Puncture Wound</h3>
-                  <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 0.25rem;">Puncture wound to foot or body, rusty/dirty nail, tetanus concerns.</p>
-                </div>
-                <div style="font-size: 1.5rem; color: var(--color-primary);">&rarr;</div>
-              </div>
+            <div class="card narrative-card">
+              <form onsubmit="event.preventDefault(); window.app.submitConcernNarrative(this.concern.value);">
+                <label class="form-label" for="concern">Describe the main concern in your own words</label>
+                <textarea id="concern" name="concern" class="form-textarea" rows="4" required placeholder="For example: I stepped on a nail through my shoe and I am worried about tetanus."></textarea>
+                ${this.narrativeError ? `<div class="inline-error" role="alert">${escapeHtml(this.narrativeError)}</div>` : ''}
+                <button type="submit" class="btn btn-primary btn-lg btn-full" style="margin-top: 1rem;">Continue with Safety Intake &rarr;</button>
+              </form>
+            </div>
 
-              <div class="card card-interactive" onclick="window.app.selectScenario('${Scenario.HEADACHE}')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                  <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--color-primary-dark);">🤕 Headache</h3>
-                  <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 0.25rem;">Sudden onset severe headache, neurological symptoms, pattern changes.</p>
-                </div>
-                <div style="font-size: 1.5rem; color: var(--color-primary);">&rarr;</div>
-              </div>
-
-              <div class="card card-interactive" onclick="window.app.selectScenario('${Scenario.FEVER}')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                  <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--color-primary-dark);">🤒 Fever</h3>
-                  <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 0.25rem;">High temperature, infants, respiratory issues, immunocompromised risk.</p>
-                </div>
-                <div style="font-size: 1.5rem; color: var(--color-primary);">&rarr;</div>
-              </div>
+            <div class="example-grid" aria-label="Classroom example concerns">
+              <button class="example-story" onclick="window.app.submitConcernNarrative('I stepped on a nail through my running shoe and I am not sure about my last tetanus shot.')">
+                <span>🦶</span><strong>Nail puncture</strong><small>Wound and tetanus next steps</small>
+              </button>
+              <button class="example-story" onclick="window.app.submitConcernNarrative('I suddenly developed the worst headache of my life.')">
+                <span>🤕</span><strong>Sudden headache</strong><small>Emergency warning-sign check</small>
+              </button>
+              <button class="example-story" onclick="window.app.submitConcernNarrative('I have had a fever since yesterday and do not know where to seek care.')">
+                <span>🤒</span><strong>Fever</strong><small>Risk and care-setting navigation</small>
+              </button>
             </div>
           </div>
         `;
@@ -405,9 +465,10 @@ export class AppController {
             <p style="color: var(--color-text-secondary); margin-bottom: 2rem;">
               Thank you for completing the safety navigation assessment and providing feedback.
             </p>
-            <button class="btn btn-primary btn-lg" onclick="window.app.startNewPatientSession()">
-              Start Another Assessment
-            </button>
+            <div style="display:flex; gap:0.75rem; justify-content:center; flex-wrap:wrap;">
+              <button class="btn btn-primary btn-lg" onclick="window.app.setTab('staff')">Open Learning Dashboard &rarr;</button>
+              <button class="btn btn-secondary btn-lg" onclick="window.app.startNewPatientSession()">Start Another Assessment</button>
+            </div>
           </div>
         `;
     }
@@ -425,6 +486,12 @@ export class AppController {
 
     return `
       <div class="container-narrow">
+        ${this.currentSession.narrative ? `
+          <div class="agent-listening-card">
+            <div class="agent-avatar">A1</div>
+            <div><strong>I hear that you are concerned about:</strong><br>${escapeHtml(this.currentSession.narrative)}</div>
+          </div>
+        ` : ''}
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
           <span style="font-size: 0.85rem; font-weight: 600; color: var(--color-primary-dark); text-transform: uppercase;">
             ${currentQ.category} &bull; Question ${idx + 1} of ${questions.length}
@@ -523,6 +590,9 @@ export class AppController {
             ⚠️ ${nav?.conceptualHandoffWarning}
           </div>
         </div>
+
+        ${this.renderAgentCollaboration()}
+        ${this.renderFeedbackForm(true)}
       </div>
     `;
   }
@@ -598,6 +668,8 @@ export class AppController {
           </div>
         </div>
 
+        ${this.renderCareOptions()}
+
         <div class="card">
           <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">Why this recommendation?</h3>
           <div style="font-size: 0.95rem; color: var(--color-text-secondary); margin-bottom: 1rem;">
@@ -621,62 +693,111 @@ export class AppController {
             ℹ️ ${nav.conceptualHandoffWarning}
           </div>
         </div>
+        ${this.renderAgentCollaboration()}
+        ${this.renderFeedbackForm(false)}
+      </div>
+    `;
+  }
 
-        <div class="card">
-          <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 1rem;">Was this guidance clear and useful?</h3>
-          <form onsubmit="event.preventDefault(); window.app.submitPatientFeedback({
-            clarityScore: this.clarityScore.value,
-            confidenceScore: this.confidenceScore.value,
-            isNextStepClear: this.isNextStepClear.value === 'yes',
-            knowsEscalation: this.knowsEscalation.value === 'yes',
-            confusingItems: this.confusingItems.value,
-            comments: this.comments.value
-          });">
-            <div class="form-group">
-              <label class="form-label">How clear was the next step recommendation? (1 = Confusing, 5 = Extremely Clear)</label>
-              <select name="clarityScore" class="form-select">
-                <option value="5" selected>5 - Extremely Clear</option>
-                <option value="4">4 - Clear</option>
-                <option value="3">3 - Neutral</option>
-                <option value="2">2 - Somewhat Confusing</option>
-                <option value="1">1 - Very Confusing</option>
-              </select>
-            </div>
+  renderCareOptions() {
+    const disposition = this.currentRuleResult?.disposition;
+    if (disposition === Disposition.CALL_911_NOW) return '';
 
-            <div class="form-group">
-              <label class="form-label">How confident are you that you understand what to do? (1-5)</label>
-              <select name="confidenceScore" class="form-select">
-                <option value="5" selected>5 - Completely Confident</option>
-                <option value="4">4 - Moderately Confident</option>
-                <option value="3">3 - Neutral</option>
-                <option value="2">2 - Uncertain</option>
-                <option value="1">1 - Not Confident At All</option>
-              </select>
-            </div>
+    const scenario = this.currentSession?.scenario;
+    const options = [];
+    if (disposition === Disposition.GO_TO_ED_NOW) {
+      options.push(['Emergency Department', 'Go now. Do not delay to verify wait times.']);
+      options.push(['HealthLink BC 8-1-1', 'Call only if it does not delay emergency care.']);
+    } else if (disposition === Disposition.SAME_DAY_CLINICAL_ASSESSMENT) {
+      options.push(['Urgent and Primary Care Centre', 'Same-day wound or symptom assessment.']);
+      options.push(['Primary care or walk-in clinic', 'Call ahead to confirm same-day capacity.']);
+      options.push(['HealthLink BC 8-1-1', 'A registered nurse can help identify an appropriate service.']);
+    } else if (disposition === Disposition.CONTACT_811_OR_PRIMARY_CARE) {
+      options.push(['HealthLink BC 8-1-1', 'Free registered-nurse advice in British Columbia.']);
+      options.push(['Primary care or community clinic', 'Arrange non-emergency assessment.']);
+      if (scenario === Scenario.NAIL_PUNCTURE) options.push(['Pharmacy or public-health service', 'Call first to confirm vaccination services.']);
+    } else {
+      options.push(['Home monitoring', 'Follow the safety-net instructions shown above.']);
+      options.push(['HealthLink BC 8-1-1', 'Call if you remain concerned or symptoms change.']);
+    }
 
-            <div class="form-group">
-              <label class="form-label">Do you know what warning signs should cause you to escalate?</label>
-              <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem;">
-                <label><input type="radio" name="knowsEscalation" value="yes" checked /> Yes</label>
-                <label><input type="radio" name="knowsEscalation" value="no" /> No</label>
-              </div>
-            </div>
+    const nailSummary = scenario === Scenario.NAIL_PUNCTURE ? `
+      <div class="nail-summary-grid">
+        <div><span>Wound assessment</span><strong>${disposition === Disposition.SAME_DAY_CLINICAL_ASSESSMENT ? 'Same-day assessment recommended' : 'Follow the care level shown above'}</strong></div>
+        <div><span>Tetanus assessment</span><strong>${['over_5_years', 'unknown', 'never'].includes(this.currentHandoff?.answers?.tetanusStatus) ? 'A tetanus-containing vaccine may be recommended' : 'Recent vaccination reported'}</strong></div>
+        <div><span>Tetanus immune globulin</span><strong>Healthcare professional to confirm</strong></div>
+      </div>
+    ` : '';
 
-            <div class="form-group">
-              <label class="form-label">Was anything confusing or missing?</label>
-              <input type="text" name="confusingItems" class="form-control" placeholder="Optional notes on confusing terms..." />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Additional Feedback Comment</label>
-              <textarea name="comments" class="form-textarea" rows="3" placeholder="Optional comments..."></textarea>
-            </div>
-
-            <button type="submit" class="btn btn-primary btn-lg btn-full">
-              Submit Patient Feedback & Complete &rarr;
-            </button>
-          </form>
+    return `
+      <div class="card care-options-card">
+        <div class="section-heading-row">
+          <div><div class="eyebrow">AGENT 2 — PRACTICAL NAVIGATION</div><h3>Care options for this demonstration</h3></div>
+          <span class="badge badge-info">SYNTHETIC</span>
         </div>
+        ${nailSummary}
+        <div class="care-option-grid">
+          ${options.map(([title, detail]) => `<div class="care-option"><strong>${title}</strong><span>${detail}</span></div>`).join('')}
+        </div>
+        <p class="demo-caveat">Service availability, opening hours and wait times have not been verified. Conceptual handoff only—no information has been transmitted.</p>
+      </div>
+    `;
+  }
+
+  renderAgentCollaboration() {
+    const rule = this.currentRuleResult;
+    if (!rule) return '';
+    return `
+      <div class="card collaboration-card">
+        <div class="eyebrow">VISIBLE AGENT COLLABORATION</div>
+        <h3>How ED Compass produced this guidance</h3>
+        <div class="collaboration-flow">
+          <div class="collaboration-step complete"><span>A1</span><strong>Listen & Intake</strong><small>Structured ${Object.keys(this.currentHandoff?.answers || {}).length} reported facts</small></div>
+          <div class="flow-arrow">→</div>
+          <div class="collaboration-step rule"><span>R</span><strong>Safety Rules</strong><small>Applied ${escapeHtml(rule.ruleId)} v${escapeHtml(rule.ruleVersion)}</small></div>
+          <div class="flow-arrow">→</div>
+          <div class="collaboration-step complete"><span>A2</span><strong>Care Navigation</strong><small>Explained the approved route and safety net</small></div>
+          <div class="flow-arrow">→</div>
+          <div class="collaboration-step"><span>A3</span><strong>Feedback & Learning</strong><small>Ready to capture patient and provider feedback</small></div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderFeedbackForm(compact = false) {
+    return `
+      <div class="card feedback-card">
+        <div class="eyebrow">AGENT 3 — FEEDBACK & LEARNING</div>
+        <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.35rem;">Was this guidance understandable and realistic?</h3>
+        <p style="color: var(--color-text-muted); margin-bottom: 1rem;">Your feedback becomes a synthetic review item; it never changes a clinical rule automatically.</p>
+        <form onsubmit="event.preventDefault(); window.app.submitPatientFeedback({
+          helpful: this.helpful.value === 'yes',
+          clarityScore: this.clarityScore.value,
+          trustScore: this.trustScore.value,
+          confidenceScore: this.confidenceScore.value,
+          isNextStepClear: this.isNextStepClear.value === 'yes',
+          knowsEscalation: this.knowsEscalation.value === 'yes',
+          canFollow: this.canFollow.value,
+          accessBarrier: this.accessBarrier.value,
+          unsafeConcern: this.unsafeConcern.checked,
+          confusingItems: this.confusingItems.value,
+          comments: this.comments.value
+        });">
+          <div class="feedback-grid">
+            <label class="form-group"><span class="form-label">Helpful?</span><select name="helpful" class="form-select"><option value="yes">👍 Yes</option><option value="no">👎 No</option></select></label>
+            <label class="form-group"><span class="form-label">Clarity (1–5)</span><select name="clarityScore" class="form-select">${ratingOptions()}</select></label>
+            <label class="form-group"><span class="form-label">Trust (1–5)</span><select name="trustScore" class="form-select">${ratingOptions()}</select></label>
+            <label class="form-group"><span class="form-label">Confidence (1–5)</span><select name="confidenceScore" class="form-select">${ratingOptions()}</select></label>
+            <label class="form-group"><span class="form-label">Next step clear?</span><select name="isNextStepClear" class="form-select"><option value="yes">Yes</option><option value="no">No</option></select></label>
+            <label class="form-group"><span class="form-label">Know when to escalate?</span><select name="knowsEscalation" class="form-select"><option value="yes">Yes</option><option value="no">No</option></select></label>
+            <label class="form-group"><span class="form-label">Can you follow this plan?</span><select name="canFollow" class="form-select"><option value="yes">Yes</option><option value="maybe">Maybe</option><option value="no">No</option></select></label>
+            <label class="form-group"><span class="form-label">Main access barrier</span><select name="accessBarrier" class="form-select"><option value="">None</option><option value="transportation">Transportation</option><option value="childcare">Childcare</option><option value="distance">Distance</option><option value="cost">Cost</option><option value="language">Language</option><option value="mobility">Mobility or disability</option><option value="trust">Cultural safety or trust</option></select></label>
+          </div>
+          <label class="safety-checkbox"><input type="checkbox" name="unsafeConcern" /> I believe something about this guidance could be unsafe.</label>
+          ${compact ? '<input type="hidden" name="confusingItems" value="" />' : '<label class="form-group"><span class="form-label">Was anything confusing or missing?</span><input type="text" name="confusingItems" class="form-control" placeholder="Optional" /></label>'}
+          <label class="form-group"><span class="form-label">Additional comment</span><textarea name="comments" class="form-textarea" rows="2" placeholder="Optional feedback"></textarea></label>
+          <button type="submit" class="btn btn-primary btn-lg btn-full">Submit Feedback & Update Dashboard &rarr;</button>
+        </form>
       </div>
     `;
   }
@@ -685,17 +806,25 @@ export class AppController {
 
   renderStaffDashboard() {
     const metrics = SyntheticStore.calculateMetrics();
-    const encounters = SyntheticStore.getEncounters();
+    const encounters = SyntheticStore.getEncounters().filter(enc => {
+      if (this.dashboardFilters.scenario !== 'ALL' && enc.scenario !== this.dashboardFilters.scenario) return false;
+      if (this.dashboardFilters.disposition !== 'ALL' && enc.disposition !== this.dashboardFilters.disposition) return false;
+      if (this.dashboardFilters.safetyFlag !== 'ALL' && (enc.feedbackAnalysis?.feedbackStream || 'PATIENT_EXPERIENCE') !== this.dashboardFilters.safetyFlag) return false;
+      if (this.dashboardFilters.reviewStatus !== 'ALL' && (enc.staffReview?.status || 'PENDING') !== this.dashboardFilters.reviewStatus) return false;
+      return true;
+    });
+    const topBarriers = Object.entries(metrics.barrierCounts || {}).sort((a, b) => b[1] - a[1]);
 
     return `
       <div>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
           <div>
-            <h1 style="font-family: var(--font-heading); font-size: 2rem; font-weight: 700;">Staff Quality & Review Dashboard</h1>
-            <p style="color: var(--color-text-muted); font-size: 0.9rem;">Review synthetic patient interactions, safety flags, and staff clinical agreement.</p>
+            <div class="eyebrow">PROVIDER + HEALTH-SYSTEM VIEW</div>
+            <h1 style="font-family: var(--font-heading); font-size: 2rem; font-weight: 700;">Learning System Dashboard</h1>
+            <p style="color: var(--color-text-muted); font-size: 0.9rem;">Learn from patient experience, provider review and system-level navigation patterns.</p>
           </div>
           <div style="display: flex; gap: 0.5rem;">
-            <button class="btn btn-secondary" onclick="SyntheticStore.resetToDefaults(); window.app.render();">
+            <button class="btn btn-secondary" onclick="window.app.resetDemoData();">
               🔄 Reset Demo Data
             </button>
           </div>
@@ -705,27 +834,37 @@ export class AppController {
           📊 <strong>SYNTHETIC DEMONSTRATION DATA:</strong> Dashboard values reflect simulated educational test encounters.
         </div>
 
-        <!-- TOP METRICS GRID -->
+        <div class="perspective-grid">
+          <div class="perspective-card"><span>01</span><strong>Patient experience</strong><small>Clarity, trust, confidence and barriers to following the recommendation.</small></div>
+          <div class="perspective-card"><span>02</span><strong>Provider learning</strong><small>Agreement, missed questions, safety concerns and qualitative review.</small></div>
+          <div class="perspective-card"><span>03</span><strong>System learning</strong><small>Care destinations, pathway demand, access barriers and improvement opportunities.</small></div>
+        </div>
+
         <div class="metrics-grid">
           <div class="metric-card">
-            <div class="metric-title">Total Interactions</div>
-            <div class="metric-value">${metrics.totalEncounters}</div>
-            <div class="metric-subtext">Completed synthetic encounters</div>
+            <div class="metric-title">Filtered Interactions</div>
+            <div class="metric-value">${encounters.length}</div>
+            <div class="metric-subtext">${metrics.totalEncounters} total synthetic records</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Emergency Rate</div>
-            <div class="metric-value" style="color: var(--color-danger);">${metrics.emergencyEscalationRate}</div>
-            <div class="metric-subtext">${metrics.emergencyCount} 911/ED escalations</div>
+            <div class="metric-title">Community Navigation</div>
+            <div class="metric-value" style="color: var(--color-primary);">${metrics.communityNavigationRate}</div>
+            <div class="metric-subtext">Not a claim of avoided ED visits</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Avg Clarity Score</div>
+            <div class="metric-title">Avg Clarity</div>
             <div class="metric-value" style="color: var(--color-success);">${metrics.avgClarity} / 5</div>
-            <div class="metric-subtext">Patient clarity rating</div>
+            <div class="metric-subtext">Patient-reported understanding</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Staff Agreement</div>
-            <div class="metric-value" style="color: var(--color-primary);">${metrics.staffAgreementRate}</div>
-            <div class="metric-subtext">Disposition appropriateness</div>
+            <div class="metric-title">Avg Trust</div>
+            <div class="metric-value" style="color: var(--color-primary);">${metrics.avgTrust} / 5</div>
+            <div class="metric-subtext">Patient trust rating</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Plan Feasible</div>
+            <div class="metric-value">${metrics.canFollowRate}</div>
+            <div class="metric-subtext">Patients reporting “Yes”</div>
           </div>
           <div class="metric-card">
             <div class="metric-title">Safety Concerns</div>
@@ -734,9 +873,20 @@ export class AppController {
           </div>
         </div>
 
-        <!-- ENCOUNTER TABLE -->
+        <div class="dashboard-insight-grid">
+          <div class="card"><div class="eyebrow">CARE DESTINATIONS</div><h3>${metrics.emergencyCount} emergency · ${metrics.communityCount} community/home</h3><p>Shows where the governed pathways recommended care—not whether an ED visit was definitively avoided.</p></div>
+          <div class="card"><div class="eyebrow">ACCESS BARRIERS</div><h3>${topBarriers.length ? topBarriers.map(([key, count]) => `${escapeHtml(key)} (${count})`).join(' · ') : 'No barriers reported'}</h3><p>Barriers help planners understand whether a recommendation is realistically actionable.</p></div>
+          <div class="card"><div class="eyebrow">PROVIDER AGREEMENT</div><h3>${metrics.staffAgreementRate}</h3><p>Disposition agreement among completed synthetic staff reviews.</p></div>
+        </div>
+
         <div class="card">
-          <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 1rem;">Synthetic Encounter Log</h3>
+          <div class="section-heading-row"><div><div class="eyebrow">REVIEW QUEUE</div><h3>Synthetic encounter log</h3></div></div>
+          <div class="filter-grid">
+            <label><span>Pathway</span><select class="form-select" onchange="window.app.setDashboardFilter('scenario', this.value)"><option value="ALL">All</option>${Object.values(Scenario).map(v => `<option value="${v}" ${this.dashboardFilters.scenario === v ? 'selected' : ''}>${v.replace('_', ' ')}</option>`).join('')}</select></label>
+            <label><span>Disposition</span><select class="form-select" onchange="window.app.setDashboardFilter('disposition', this.value)"><option value="ALL">All</option>${Object.values(Disposition).map(v => `<option value="${v}" ${this.dashboardFilters.disposition === v ? 'selected' : ''}>${DISPOSITION_METADATA[v].label}</option>`).join('')}</select></label>
+            <label><span>Feedback stream</span><select class="form-select" onchange="window.app.setDashboardFilter('safetyFlag', this.value)"><option value="ALL">All</option><option value="PATIENT_EXPERIENCE" ${this.dashboardFilters.safetyFlag === 'PATIENT_EXPERIENCE' ? 'selected' : ''}>Patient experience</option><option value="SAFETY_SURVEILLANCE" ${this.dashboardFilters.safetyFlag === 'SAFETY_SURVEILLANCE' ? 'selected' : ''}>Safety surveillance</option></select></label>
+            <label><span>Review status</span><select class="form-select" onchange="window.app.setDashboardFilter('reviewStatus', this.value)"><option value="ALL">All</option><option value="PENDING" ${this.dashboardFilters.reviewStatus === 'PENDING' ? 'selected' : ''}>Pending</option><option value="COMPLETED" ${this.dashboardFilters.reviewStatus === 'COMPLETED' ? 'selected' : ''}>Completed</option></select></label>
+          </div>
 
           <div class="table-container">
             <table class="data-table">
@@ -746,8 +896,8 @@ export class AppController {
                   <th>Scenario</th>
                   <th>Disposition</th>
                   <th>Rule ID & Version</th>
-                  <th>Clarity</th>
-                  <th>Safety Flag</th>
+                  <th>Patient Feedback</th>
+                  <th>Feedback Stream</th>
                   <th>Staff Review</th>
                   <th>Action</th>
                 </tr>
@@ -766,9 +916,9 @@ export class AppController {
                         <span class="badge ${meta?.badgeClass}">${meta?.label || enc.disposition}</span>
                       </td>
                       <td><code>${enc.ruleId}</code> v${enc.ruleVersion}</td>
-                      <td>${enc.patientFeedback?.clarityScore ? `${enc.patientFeedback.clarityScore}/5` : 'N/A'}</td>
+                      <td>${enc.patientFeedback?.clarityScore ? `Clarity ${enc.patientFeedback.clarityScore}/5 · Trust ${enc.patientFeedback.trustScore || 'N/A'}/5` : 'Awaiting feedback'}</td>
                       <td>
-                        ${hasSafetyFlag ? '<span class="badge badge-danger">⚠️ SAFETY FLAG</span>' : '<span style="color: var(--color-text-muted);">None</span>'}
+                        ${hasSafetyFlag ? '<span class="badge badge-danger">⚠️ SAFETY SURVEILLANCE</span>' : '<span class="badge badge-info">PATIENT EXPERIENCE</span>'}
                       </td>
                       <td>
                         ${reviewDone ? '<span class="badge badge-success">COMPLETED</span>' : '<span class="badge badge-warning">PENDING</span>'}
@@ -778,10 +928,62 @@ export class AppController {
                       </td>
                     </tr>
                   `;
-                }).join('')}
+                }).join('') || '<tr><td colspan="8" style="text-align:center; padding:2rem;">No encounters match the selected filters.</td></tr>'}
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderArchitectureView() {
+    return `
+      <div class="architecture-page">
+        <div class="architecture-hero">
+          <div class="eyebrow">NO WRONG DOOR + GOVERNED LEARNING</div>
+          <h1>One front door, several safe care destinations</h1>
+          <p>ED Compass listens first, separates conversational support from clinical disposition, and turns patient and provider feedback into governed improvement—not automatic rule changes.</p>
+        </div>
+
+        <div class="architecture-lanes">
+          <section class="architecture-lane patient-lane">
+            <div class="lane-title"><span>Patient-facing layer</span><small>Listen · assess · explain · navigate</small></div>
+            <div class="architecture-flow">
+              <div class="architecture-node"><b>Patient or caregiver</b><small>Describes the concern in their own words</small></div>
+              <div class="architecture-arrow">→</div>
+              <div class="architecture-node agent-node"><b>Agent 1</b><small>Safety intake and structured facts</small></div>
+              <div class="architecture-arrow">→</div>
+              <div class="architecture-node safety-node"><b>Deterministic rules</b><small>Only source of disposition and safety net</small></div>
+              <div class="architecture-arrow">→</div>
+              <div class="architecture-node agent-node"><b>Agent 2</b><small>Plain-language care navigation</small></div>
+            </div>
+          </section>
+
+          <section class="architecture-lane routing-lane">
+            <div class="lane-title"><span>Conceptual care-routing layer</span><small>No live information is transmitted</small></div>
+            <div class="destination-grid">
+              <div>Call 911 now</div><div>Emergency department</div><div>Same-day urgent care</div><div>8-1-1 / primary care</div><div>Home monitoring</div>
+            </div>
+          </section>
+
+          <section class="architecture-lane learning-lane">
+            <div class="lane-title"><span>Learning and governance layer</span><small>Patient · provider · health system</small></div>
+            <div class="architecture-flow">
+              <div class="architecture-node agent-node"><b>Agent 3</b><small>Classifies experience and safety feedback</small></div>
+              <div class="architecture-arrow">→</div>
+              <div class="architecture-node"><b>Synthetic dashboard</b><small>Shows navigation, trust, barriers and review</small></div>
+              <div class="architecture-arrow">→</div>
+              <div class="architecture-node governance-node"><b>Human governance</b><small>Review → test → approve → monitor</small></div>
+              <div class="architecture-loop">↺ Versioned pathway update only after approval</div>
+            </div>
+          </section>
+        </div>
+
+        <div class="boundary-grid">
+          <div class="card"><div class="eyebrow">SAFETY BOUNDARY</div><h3>Agents cannot override the rule engine</h3><p>Conversational components may listen, structure, explain and classify. They cannot change urgency, route, rule ID, version or safety-net instructions.</p></div>
+          <div class="card"><div class="eyebrow">DATA BOUNDARY</div><h3>Synthetic local demonstration data</h3><p>No names, health numbers, addresses or real clinical-system connections are used in this academic prototype.</p></div>
+          <div class="card"><div class="eyebrow">INTEGRATION BOUNDARY</div><h3>Conceptual service routing</h3><p>911, HealthLink BC 8-1-1, HEiDi, RTVS, EHRs and service directories are not connected.</p></div>
         </div>
       </div>
     `;
@@ -823,17 +1025,17 @@ export class AppController {
                     <td><code>${imp.sourceSessionId}</code></td>
                     <td style="text-transform: capitalize;">${imp.scenario}</td>
                     <td><code>${imp.currentRuleId}</code> v${imp.currentRuleVersion}</td>
-                    <td style="max-width: 250px;">${imp.proposedChange}</td>
+                    <td style="max-width: 250px;">${escapeHtml(imp.proposedChange)}</td>
                     <td>
-                      <select class="form-select" style="font-size: 0.8rem; padding: 0.25rem;" onchange="SyntheticStore.updateImprovementStatus('${imp.improvementId}', this.value); window.app.render();">
+                      <select class="form-select" style="font-size: 0.8rem; padding: 0.25rem;" onchange="window.app.changeImprovementStatus('${imp.improvementId}', this.value);">
                         ${Object.values(ImprovementStatus).map(st => `
                           <option value="${st}" ${imp.status === st ? 'selected' : ''}>${st}</option>
                         `).join('')}
                       </select>
                     </td>
-                    <td>${imp.reviewer}</td>
+                    <td>${escapeHtml(imp.reviewer)}</td>
                     <td>
-                      <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="alert('Proposal Details:\\n\\nReason: ${imp.reason}\\nLast Updated: ${imp.updatedAt}')">
+                      <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="alert('This synthetic proposal remains subject to human clinical review, testing and approval.')">
                         Audit
                       </button>
                     </td>
@@ -901,6 +1103,20 @@ export class AppController {
                 </div>
               </div>
 
+              <div class="review-feedback-summary">
+                <div class="eyebrow">PATIENT FEEDBACK</div>
+                ${enc.patientFeedback ? `
+                  <div class="feedback-summary-grid">
+                    <span>Clarity <strong>${enc.patientFeedback.clarityScore}/5</strong></span>
+                    <span>Trust <strong>${enc.patientFeedback.trustScore || 'N/A'}/5</strong></span>
+                    <span>Can follow <strong>${escapeHtml(enc.patientFeedback.canFollow || 'N/A')}</strong></span>
+                    <span>Barrier <strong>${escapeHtml(enc.patientFeedback.accessBarrier || 'None')}</strong></span>
+                  </div>
+                  <p><strong>Comment:</strong> ${escapeHtml(enc.patientFeedback.comments || 'No comment provided.')}</p>
+                  <p><strong>Feedback stream:</strong> ${escapeHtml(enc.feedbackAnalysis?.feedbackStream || 'PATIENT_EXPERIENCE')}</p>
+                ` : '<p>Patient feedback has not yet been submitted. The recommendation was still retained for quality review.</p>'}
+              </div>
+
               <!-- STAFF REVIEW FORM -->
               <div style="border: 1px solid var(--color-border); padding: 1rem; border-radius: var(--radius-md);">
                 <h4 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem;">Staff Clinical Quality Review</h4>
@@ -919,8 +1135,24 @@ export class AppController {
                     </select>
                   </div>
                   <div class="form-group">
+                    <label class="form-label">Were essential questions asked?</label>
+                    <select name="essentialQuestionsAsked" class="form-select">
+                      <option value="YES" ${enc.staffReview?.essentialQuestionsAsked === 'YES' ? 'selected' : ''}>YES</option>
+                      <option value="NO" ${enc.staffReview?.essentialQuestionsAsked === 'NO' ? 'selected' : ''}>NO</option>
+                      <option value="UNSURE" ${enc.staffReview?.essentialQuestionsAsked === 'UNSURE' ? 'selected' : ''}>UNSURE</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Was the explanation clear?</label>
+                    <select name="explanationClear" class="form-select">
+                      <option value="YES" ${enc.staffReview?.explanationClear === 'YES' ? 'selected' : ''}>YES</option>
+                      <option value="NO" ${enc.staffReview?.explanationClear === 'NO' ? 'selected' : ''}>NO</option>
+                      <option value="UNSURE" ${enc.staffReview?.explanationClear === 'UNSURE' ? 'selected' : ''}>UNSURE</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
                     <label class="form-label">Reviewer Clinical Notes</label>
-                    <textarea name="reviewerNotes" class="form-textarea" rows="2" placeholder="Clinical audit notes...">${enc.staffReview?.reviewerNotes || ''}</textarea>
+                    <textarea name="reviewerNotes" class="form-textarea" rows="2" placeholder="Clinical audit notes...">${escapeHtml(enc.staffReview?.reviewerNotes || '')}</textarea>
                   </div>
                   <div style="display: flex; gap: 0.75rem;">
                     <button type="submit" class="btn btn-primary">Save Review</button>
@@ -984,6 +1216,21 @@ export class AppController {
     this.activeModal = 'create_improvement';
     this.render();
   }
+}
+
+function ratingOptions() {
+  return [5, 4, 3, 2, 1]
+    .map(value => `<option value="${value}" ${value === 5 ? 'selected' : ''}>${value}</option>`)
+    .join('');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
 // Global initialization helper

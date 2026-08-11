@@ -10,7 +10,7 @@
 
 import { Disposition } from '../types.js';
 
-export const FEVER_PATHWAY_VERSION = '1.0';
+export const FEVER_PATHWAY_VERSION = '1.1';
 
 export const feverRules = [
   {
@@ -22,13 +22,16 @@ export const feverRules = [
     destinationType: 'Emergency Services (911)',
     condition: (facts) => 
       facts.severeBreathingDifficulty === true ||
+      facts.severeBreathingDifficulty === null ||
       facts.unresponsiveOrSeverelyConfused === true ||
-      facts.blueLipsOrFace === true,
+      facts.unresponsiveOrSeverelyConfused === null ||
+      facts.blueLipsOrFace === true ||
+      facts.blueLipsOrFace === null,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.severeBreathingDifficulty) triggers.push('severeBreathingDifficulty');
-      if (facts.unresponsiveOrSeverelyConfused) triggers.push('unresponsiveOrSeverelyConfused');
-      if (facts.blueLipsOrFace) triggers.push('blueLipsOrFace');
+      if (facts.severeBreathingDifficulty === true || facts.severeBreathingDifficulty === null) triggers.push('severeBreathingDifficulty');
+      if (facts.unresponsiveOrSeverelyConfused === true || facts.unresponsiveOrSeverelyConfused === null) triggers.push('unresponsiveOrSeverelyConfused');
+      if (facts.blueLipsOrFace === true || facts.blueLipsOrFace === null) triggers.push('blueLipsOrFace');
       return triggers;
     },
     explanationKey: 'Severe respiratory distress (gasping, unable to speak full words), severe confusion/lethargy, or blue lips/skin indicate critical physiological instability requiring emergency dispatch.',
@@ -47,15 +50,19 @@ export const feverRules = [
     destinationType: 'Emergency Department',
     condition: (facts) => 
       facts.isInfantUnder3Months === true ||
+      facts.isInfantUnder3Months === null ||
       facts.neckStiffnessOrSevereHeadache === true ||
+      facts.neckStiffnessOrSevereHeadache === null ||
       facts.nonBlanchingPurpuricRash === true ||
-      facts.severeRapidDeterioration === true,
+      facts.nonBlanchingPurpuricRash === null ||
+      facts.severeRapidDeterioration === true ||
+      facts.severeRapidDeterioration === null,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.isInfantUnder3Months) triggers.push('isInfantUnder3Months');
-      if (facts.neckStiffnessOrSevereHeadache) triggers.push('neckStiffnessOrSevereHeadache');
-      if (facts.nonBlanchingPurpuricRash) triggers.push('nonBlanchingPurpuricRash');
-      if (facts.severeRapidDeterioration) triggers.push('severeRapidDeterioration');
+      if (facts.isInfantUnder3Months === true || facts.isInfantUnder3Months === null) triggers.push('isInfantUnder3Months');
+      if (facts.neckStiffnessOrSevereHeadache === true || facts.neckStiffnessOrSevereHeadache === null) triggers.push('neckStiffnessOrSevereHeadache');
+      if (facts.nonBlanchingPurpuricRash === true || facts.nonBlanchingPurpuricRash === null) triggers.push('nonBlanchingPurpuricRash');
+      if (facts.severeRapidDeterioration === true || facts.severeRapidDeterioration === null) triggers.push('severeRapidDeterioration');
       return triggers;
     },
     explanationKey: 'Fever in a young infant (<3 months), fever with neck stiffness/photophobia, a dark purple non-fading rash, or rapid systemic collapse require urgent Emergency Department evaluation.',
@@ -74,7 +81,9 @@ export const feverRules = [
     destinationType: 'Emergency Department / Cancer Centre On-Call',
     condition: (facts) => 
       facts.onChemotherapyOrNeutropenic === true ||
+      facts.onChemotherapyOrNeutropenic === null ||
       facts.significantImmunosuppression === true ||
+      facts.significantImmunosuppression === null ||
       facts.organTransplantOrBiologic === true,
     triggeredBy: (facts) => {
       const triggers = [];

@@ -10,7 +10,7 @@
 
 import { Disposition } from '../types.js';
 
-export const NAIL_PUNCTURE_PATHWAY_VERSION = '1.0';
+export const NAIL_PUNCTURE_PATHWAY_VERSION = '1.1';
 
 export const nailPunctureRules = [
   {
@@ -20,7 +20,7 @@ export const nailPunctureRules = [
     disposition: Disposition.CALL_911_NOW,
     timing: 'Immediate',
     destinationType: 'Emergency Services (911)',
-    condition: (facts) => facts.uncontrolledBleeding === true,
+    condition: (facts) => facts.uncontrolledBleeding === true || facts.uncontrolledBleeding === null,
     triggeredBy: ['uncontrolledBleeding'],
     explanationKey: 'Uncontrolled severe bleeding from a puncture wound requires immediate emergency care.',
     safetyNet: [
@@ -38,12 +38,14 @@ export const nailPunctureRules = [
     destinationType: 'Emergency Department',
     condition: (facts) => 
       facts.numbnessOrCirculationIssue === true ||
+      facts.numbnessOrCirculationIssue === null ||
       facts.objectEmbedded === true ||
+      facts.objectEmbedded === null ||
       facts.severeSpreadingInfection === true,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.numbnessOrCirculationIssue) triggers.push('numbnessOrCirculationIssue');
-      if (facts.objectEmbedded) triggers.push('objectEmbedded');
+      if (facts.numbnessOrCirculationIssue === true || facts.numbnessOrCirculationIssue === null) triggers.push('numbnessOrCirculationIssue');
+      if (facts.objectEmbedded === true || facts.objectEmbedded === null) triggers.push('objectEmbedded');
       if (facts.severeSpreadingInfection) triggers.push('severeSpreadingInfection');
       return triggers;
     },
@@ -63,8 +65,11 @@ export const nailPunctureRules = [
     destinationType: 'Urgent Care Centre / Same-Day Clinic',
     condition: (facts) => 
       facts.deepPenetration === true ||
+      facts.deepPenetration === null ||
       facts.highRiskHost === true ||
+      facts.highRiskHost === null ||
       facts.grossContamination === true ||
+      facts.grossContamination === null ||
       facts.worseningPainOrSwelling === true,
     triggeredBy: (facts) => {
       const triggers = [];
@@ -72,6 +77,7 @@ export const nailPunctureRules = [
       if (facts.highRiskHost) triggers.push('highRiskHost');
       if (facts.grossContamination) triggers.push('grossContamination');
       if (facts.worseningPainOrSwelling) triggers.push('worseningPainOrSwelling');
+      if (['over_5_years', 'unknown', 'never'].includes(facts.tetanusStatus)) triggers.push('tetanusStatus');
       return triggers;
     },
     explanationKey: 'Deep puncture wounds (especially through footwear into bone/joint), gross contamination (soil/manure), worsening local pain, or high-risk medical conditions (diabetes, immunosuppression) require urgent medical evaluation for infection prevention and joint/bone surveillance.',

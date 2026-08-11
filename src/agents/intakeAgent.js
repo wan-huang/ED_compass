@@ -43,9 +43,15 @@ export const INTAKE_QUESTIONS = {
     },
     {
       id: 'grossContamination',
-      label: 'Was the nail rusty, dirty, or contaminated with soil or animal waste?',
+      label: 'Was the wound contaminated with soil, mud, animal or human waste, saliva, or dirty water?',
       type: 'boolean',
       category: 'Contamination'
+    },
+    {
+      id: 'isRusty',
+      label: 'Did the nail or sharp object look rusty?',
+      type: 'boolean',
+      category: 'Context Only — No Decision Weight'
     },
     {
       id: 'worseningPainOrSwelling',
@@ -239,10 +245,11 @@ export class IntakeAgent {
   /**
    * Initializes a new intake session.
    */
-  static createSession(sessionId, scenario) {
+  static createSession(sessionId, scenario, narrative = '') {
     return {
       sessionId,
       scenario,
+      narrative,
       answers: {},
       uncertainties: [],
       missingFields: [],
@@ -271,7 +278,10 @@ export class IntakeAgent {
     let emergencyStopDetected = sessionState.emergencyStopDetected;
     let emergencyTriggerField = sessionState.emergencyTriggerField;
 
-    if (questionDef && questionDef.isEmergencyRedFlag && value === true) {
+    // Safety-critical uncertainty is handled conservatively. A patient who
+    // cannot rule out an emergency warning sign receives the same early stop
+    // as a reported warning sign.
+    if (questionDef && questionDef.isEmergencyRedFlag && (value === true || isUnsure)) {
       emergencyStopDetected = true;
       emergencyTriggerField = fieldId;
     }
@@ -300,14 +310,19 @@ export class IntakeAgent {
       .map(q => q.id);
 
     return {
+      schemaVersion: '1.1',
       sessionId: sessionState.sessionId,
       scenario: sessionState.scenario,
+      pathway: sessionState.scenario,
+      pathwayVersion: '1.1',
+      narrative: sessionState.narrative || '',
       answers: sessionState.answers,
       missingFields,
       uncertainties: sessionState.uncertainties,
       emergencyStopDetected: sessionState.emergencyStopDetected,
       emergencyTriggerField: sessionState.emergencyTriggerField,
       agentVersion: AgentVersion.INTAKE,
+      uncertaintyPresent: sessionState.uncertainties.length > 0,
       completedAt: new Date().toISOString()
     };
   }

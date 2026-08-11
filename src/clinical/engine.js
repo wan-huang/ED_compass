@@ -113,6 +113,37 @@ export class ClinicalRuleEngine {
     if (!handoff.sessionId) errors.push('Missing sessionId');
     if (!handoff.scenario) errors.push('Missing scenario');
     if (!handoff.answers || typeof handoff.answers !== 'object') errors.push('Missing valid answers object');
+    if (!handoff.schemaVersion) errors.push('Missing schemaVersion');
+    if (!handoff.pathwayVersion) errors.push('Missing pathwayVersion');
+
+    const validScenarios = Object.values(Scenario);
+    if (handoff.scenario && !validScenarios.includes(handoff.scenario)) {
+      errors.push('Unrecognized scenario');
+    }
+
+    // No direct identifiers belong in this synthetic academic prototype.
+    const forbiddenKeys = new Set([
+      'name', 'fullname', 'firstname', 'lastname', 'phn', 'healthnumber',
+      'dateofbirth', 'dob', 'address', 'phone', 'telephone', 'email'
+    ]);
+    const inspect = (value) => {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, child] of Object.entries(value)) {
+        if (forbiddenKeys.has(key.toLowerCase().replace(/[^a-z]/g, ''))) {
+          errors.push(`Forbidden identifier field: ${key}`);
+        }
+        inspect(child);
+      }
+    };
+    inspect(handoff.answers);
+
+    if (
+      handoff.answers &&
+      Object.keys(handoff.answers).length === 0 &&
+      !handoff.emergencyStopDetected
+    ) {
+      errors.push('No clinical answers provided');
+    }
 
     return {
       isValid: errors.length === 0,

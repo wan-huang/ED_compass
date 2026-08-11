@@ -10,7 +10,7 @@
 
 import { Disposition } from '../types.js';
 
-export const HEADACHE_PATHWAY_VERSION = '1.0';
+export const HEADACHE_PATHWAY_VERSION = '1.1';
 
 export const headacheRules = [
   {
@@ -22,15 +22,19 @@ export const headacheRules = [
     destinationType: 'Emergency Services (911)',
     condition: (facts) => 
       facts.thunderclapOnset === true ||
+      facts.thunderclapOnset === null ||
       facts.focalNeuroDeficit === true ||
+      facts.focalNeuroDeficit === null ||
       facts.seizureOrSyncope === true ||
-      facts.feverWithStiffNeck === true,
+      facts.seizureOrSyncope === null ||
+      facts.feverWithStiffNeck === true ||
+      facts.feverWithStiffNeck === null,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.thunderclapOnset) triggers.push('thunderclapOnset');
-      if (facts.focalNeuroDeficit) triggers.push('focalNeuroDeficit');
-      if (facts.seizureOrSyncope) triggers.push('seizureOrSyncope');
-      if (facts.feverWithStiffNeck) triggers.push('feverWithStiffNeck');
+      if (facts.thunderclapOnset === true || facts.thunderclapOnset === null) triggers.push('thunderclapOnset');
+      if (facts.focalNeuroDeficit === true || facts.focalNeuroDeficit === null) triggers.push('focalNeuroDeficit');
+      if (facts.seizureOrSyncope === true || facts.seizureOrSyncope === null) triggers.push('seizureOrSyncope');
+      if (facts.feverWithStiffNeck === true || facts.feverWithStiffNeck === null) triggers.push('feverWithStiffNeck');
       return triggers;
     },
     explanationKey: 'A sudden headache reaching maximum intensity within seconds or minutes (thunderclap onset), weakness/numbness/speech changes, fainting/seizure, or fever accompanied by a stiff neck are severe emergency red flags requiring immediate 911 emergency care.',
