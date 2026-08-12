@@ -14,7 +14,7 @@
 
 ED Compass complements—and does NOT replace—existing services such as **911**, **HealthLink BC 8-1-1**, **HEiDi**, **Emergency Care BC RTVS**, local emergency departments, and urgent/primary care clinics.
 
-### No-Wrong-Door Demonstration Strategy (v1.2)
+### No-Wrong-Door Demonstration Strategy (v1.3)
 
 The prototype now begins with **“Tell us what is happening”** rather than requiring the patient to know which clinical pathway or healthcare service to choose. For the classroom demonstration, narrative keyword routing recognizes the three supported concerns and then hands the patient to the governed pathway.
 
@@ -32,6 +32,13 @@ The interface deliberately separates two audiences:
 
 * **Patient View** shows only the concern, safety questions, progress, care guidance, care-setting match and feedback. Rule IDs, structured JSON and agent handoffs are hidden.
 * **Presenter Console** provides one-click scenarios, decision provenance, agent collaboration, structured handoff inspection, the provider dashboard, governance queue, audit log and architecture.
+
+Each one-click scenario now includes an interactive four-stage decision walkthrough:
+
+1. **Listen & Intake** — synthetic opening statement, structured facts and handoff validation.
+2. **Safety Rules** — readable first-match condition, triggering facts, disposition, timing and factors deliberately excluded from the decision.
+3. **Care Navigation** — patient-facing explanation, next actions, safety net and the boundary preventing Agent 2 from changing urgency.
+4. **Feedback & Learning** — case-specific patient and provider feedback examples plus the governed capture → classify → review → test/approve loop.
 
 Patient-facing accessibility demonstrations include English/French switching, a larger/easier-to-read text option, browser speech-to-text for the concern narrative, and read-aloud controls for questions and the final plan. Voice input is progressive enhancement: typing remains available when browser speech recognition is unsupported or microphone permission is denied.
 

@@ -29,7 +29,14 @@ export const DEMO_CASES = [
       highRiskHost: false,
       tetanusStatus: 'over_5_years'
     },
-    teachingPoint: 'The clinical engine routes to Same-Day Assessment based on wound depth and outdated tetanus history. Rust is recorded for context but has ZERO independent decision weight.'
+    teachingPoint: 'The clinical engine routes to Same-Day Assessment based on wound depth and outdated tetanus history. Rust is recorded for context but has ZERO independent decision weight.',
+    walkthrough: {
+      ruleLogic: 'IF deep penetration is Yes OR high-risk host is Yes/Uncertain OR gross contamination is Yes/Uncertain OR pain/swelling is worsening, THEN apply NAIL-U01 and recommend same-day assessment.',
+      excludedFactor: 'Rust = Yes is retained as context, but it is not part of the decision condition and has zero independent weight.',
+      samplePatientFeedback: '“The next step is clear, but transportation to urgent care may be difficult. I now understand that wound depth and vaccine history matter—not rust by itself.”',
+      sampleProviderReview: 'Disposition appropriate; essential questions asked. Consider making the tetanus timing explanation even more prominent.',
+      learningOpportunity: 'Track recurring rust/tetanus confusion and access barriers. A wording change may be proposed, clinically reviewed, tested, approved and versioned before release.'
+    }
   },
   {
     id: 'DEMO_B',
@@ -40,7 +47,14 @@ export const DEMO_CASES = [
     presetAnswers: {
       thunderclapOnset: true // Triggers immediate early emergency stop
     },
-    teachingPoint: 'Agent 1 immediately halts routine interviewing upon detecting thunderclap onset. Routes directly to 911 dispatch without asking 10 unnecessary questions.'
+    teachingPoint: 'Agent 1 immediately halts routine interviewing upon detecting thunderclap onset. Routes directly to 911 dispatch without asking 10 unnecessary questions.',
+    walkthrough: {
+      ruleLogic: 'IF thunderclap onset is Yes/Uncertain OR a major neurological red flag is Yes/Uncertain, THEN apply HEADACHE-E01, stop routine intake and recommend calling 911 immediately.',
+      excludedFactor: 'The pathway does not wait for the remaining headache questions and does not name a diagnosis; delay and diagnostic speculation are intentionally avoided.',
+      samplePatientFeedback: '“The instruction was clear and immediate. I understood that I should not continue answering questions or drive myself.”',
+      sampleProviderReview: 'Emergency disposition appropriate; early stop appropriate; safety message concise and actionable.',
+      learningOpportunity: 'Review whether the emergency wording and read-aloud experience remain understandable under stress. Safety-critical changes require human approval and testing.'
+    }
   },
   {
     id: 'DEMO_C',
@@ -61,7 +75,14 @@ export const DEMO_CASES = [
       durationDays: 1,
       pregnancy: false
     },
-    teachingPoint: 'Clear guidance for home monitoring with explicit safety-net triggers. No medical diagnosis (e.g. "viral syndrome") is made.'
+    teachingPoint: 'Clear guidance for home monitoring with explicit safety-net triggers. No medical diagnosis (e.g. "viral syndrome") is made.',
+    walkthrough: {
+      ruleLogic: 'After higher-severity fever rules do not match, IF no emergency warning signs or high-risk host factors are reported and the fever is short duration, THEN apply FEVER-L01 for home monitoring with a safety net.',
+      excludedFactor: 'The engine does not infer “viral” or “bacterial,” and it does not ask the patient to calculate CTAS, qSOFA or SIRS.',
+      samplePatientFeedback: '“Home monitoring feels realistic. I would like the three-day threshold and the signs that mean I should seek urgent care to stand out more.”',
+      sampleProviderReview: 'Disposition appropriate for the synthetic facts; safety-net instructions present; no unsupported diagnosis made.',
+      learningOpportunity: 'Compare clarity scores and comments about escalation thresholds. A revised safety-net summary can be tested before a governed content update.'
+    }
   },
   {
     id: 'DEMO_D',
@@ -78,6 +99,13 @@ export const DEMO_CASES = [
       nonBlanchingPurpuricRash: false,
       onChemotherapyOrNeutropenic: true // High-risk host red flag
     },
-    teachingPoint: 'Routes immediately to Emergency Department / Specialist protocol due to febrile neutropenia risk. Does NOT calculate or prompt the patient for qSOFA/SIRS scores.'
+    teachingPoint: 'Routes immediately to Emergency Department / Specialist protocol due to febrile neutropenia risk. Does NOT calculate or prompt the patient for qSOFA/SIRS scores.',
+    walkthrough: {
+      ruleLogic: 'After immediate 911 and other emergency checks do not match, IF chemotherapy/neutropenia is Yes/Uncertain OR significant immunosuppression is Yes/Uncertain, THEN apply FEVER-H01 and recommend going to the ED now.',
+      excludedFactor: 'A normal-looking patient report does not lower the route. The patient is not asked to self-score CTAS, qSOFA or SIRS.',
+      samplePatientFeedback: '“I understand that chemotherapy changes the urgency. I would also want a reminder to bring my oncology card and contact information.”',
+      sampleProviderReview: 'ED disposition appropriate; high-risk-host logic applied; oncology context and triage communication included.',
+      learningOpportunity: 'Monitor whether patients understand why host risk changes urgency. Proposed oncology wording or handoff fields remain subject to clinical review and versioned testing.'
+    }
   }
 ];
