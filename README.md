@@ -14,7 +14,7 @@
 
 ED Compass complements—and does NOT replace—existing services such as **911**, **HealthLink BC 8-1-1**, **HEiDi**, **Emergency Care BC RTVS**, local emergency departments, and urgent/primary care clinics.
 
-### No-Wrong-Door Demonstration Strategy (v1.1)
+### No-Wrong-Door Demonstration Strategy (v1.2)
 
 The prototype now begins with **“Tell us what is happening”** rather than requiring the patient to know which clinical pathway or healthcare service to choose. For the classroom demonstration, narrative keyword routing recognizes the three supported concerns and then hands the patient to the governed pathway.
 
@@ -25,6 +25,15 @@ The live experience is designed to show:
 3. A deterministic rule assigning the care level.
 4. Agent 2 turning the rule into a practical care-channel plan.
 5. Agent 3 sending patient and provider feedback into a synthetic learning dashboard.
+
+### Patient View and Presenter Console
+
+The interface deliberately separates two audiences:
+
+* **Patient View** shows only the concern, safety questions, progress, care guidance, care-setting match and feedback. Rule IDs, structured JSON and agent handoffs are hidden.
+* **Presenter Console** provides one-click scenarios, decision provenance, agent collaboration, structured handoff inspection, the provider dashboard, governance queue, audit log and architecture.
+
+Patient-facing accessibility demonstrations include English/French switching, a larger/easier-to-read text option, browser speech-to-text for the concern narrative, and read-aloud controls for questions and the final plan. Voice input is progressive enhancement: typing remains available when browser speech recognition is unsupported or microphone permission is denied.
 
 > ⚠️ **ACADEMIC DISCLAIMER:** This software is an academic prototype built exclusively for the EMHI1001H course at the University of Toronto. It is **NOT** a production clinical system and must **NOT** be used to diagnose patients or make actual clinical decisions. All external handoffs display: `"Conceptual handoff only—no information has been transmitted."`
 
@@ -101,6 +110,10 @@ Proposals follow a strict governed lifecycle:
 
 > **Note**: Creating or updating an improvement proposal does **NOT** alter the live deterministic rule engine until clinically validated and released in a versioned software update.
 
+### Standalone Audit Log (`Audit Log` presenter tab)
+
+The audit view is a chronological, browser-local demonstration log. It records synthetic consent, intake, handoff, rule, recommendation, access, feedback, review and governance events with filterable payload inspection. It is intentionally labelled as a demonstration—not a production server log.
+
 ---
 
 ## 6. How to Run the Application
@@ -113,6 +126,14 @@ npm run serve
 Open your browser and navigate to:
 ```
 http://localhost:8080/
+```
+
+### Option B: GitHub Pages
+
+Every update to `main` runs both test suites and deploys the static site through `.github/workflows/pages.yml`. The expected project URL is:
+
+```text
+https://wan-huang.github.io/ED_compass/
 ```
 
 ---
@@ -138,19 +159,25 @@ Together these verify:
 * Narrative demo flow, feedback persistence, staff review, dashboard and architecture rendering
 * Rust having zero independent decision weight
 * Conservative handling of uncertain safety-critical answers
+* Emergency-department recommendations show EDs only—not 8-1-1 or virtual-care substitutes
+* Nail-puncture scenarios requiring a hands-on exam exclude virtual-only options
+* French labels change presentation without changing canonical clinical facts
+* Technical handoffs are hidden from the patient view and visible in the presenter console
 
 ---
 
 ## 8. Classroom Demonstration Script
 
-Use the built-in **⚡ DEMO QUICK LAUNCH** buttons at the top of the application:
+Open **Presenter Console** and use the four one-click scenario cards:
 
 1. **Demo A (Nail Puncture)**: Click `Demo A`. Shows wound depth, rusty nail, and outdated tetanus shot. Explains how Same-Day Assessment is assigned based on depth + tetanus shot date, demonstrating rust has 0 decision weight.
 2. **Demo B (Headache Emergency)**: Click `Demo B`. Patient reports sudden thunderclap onset. Demonstrates early emergency stop, bypassing remaining questions, and showing immediate 911 red warning card.
 3. **Demo C (Lower-Risk Fever)**: Click `Demo C`. Stable adult with 24h fever drinking fluids well. Demonstrates concise screening, home monitoring disposition, and safety-net triggers.
 4. **Demo D (High-Risk Fever)**: Click `Demo D`. Chemotherapy patient with fever. Demonstrates host-risk escalation to Emergency Department without prompting for CTAS/qSOFA scores.
-5. **Staff Dashboard Review**: Submit patient feedback, open the Learning System Dashboard, review the new encounter, submit a provider review, and launch a QI Improvement Proposal.
-6. **Architecture Close**: Open `How It Works` to show the patient-facing, safety, conceptual-routing, synthetic-data and human-governance boundaries.
+5. **Patient Experience**: Switch to Patient View to show that rule IDs and handoff JSON disappear. Demonstrate free-text concern entry, French, voice input/read-aloud, progress, and care-setting matching.
+6. **Safe Access Matching**: For an ED result, show that the recommended ED appears first in green and that 8-1-1/virtual care are not offered as alternatives. For a nail puncture requiring assessment, show the in-person warning.
+7. **Staff Dashboard Review**: Submit patient feedback, open the Learning Dashboard, review the new encounter, submit a provider review, and launch a QI Improvement Proposal.
+8. **Audit + Architecture Close**: Filter the Audit Log by the session ID, inspect rule provenance, then open Architecture to explain the patient, routing, learning and governance boundaries.
 
 ---
 
@@ -182,9 +209,12 @@ AG_ED-Compass/
 │   ├── store/
 │   │   ├── syntheticStore.js     # Pre-seeded Encounters & Metrics Store
 │   │   ├── auditLogger.js        # Reproducible Audit Event Logger
+│   │   ├── facilities.js         # Synthetic, urgency-preserving care matches
 │   │   └── demoCases.js          # Preset 1-Click Demo Scenarios
 │   └── ui/
-│       └── app.js                # Single-Page Reactive Application Controller
+│       ├── app.js                # Single-Page Reactive Application Controller
+│       └── i18n.js               # English/French patient presentation strings
+├── .github/workflows/pages.yml   # Test-gated GitHub Pages deployment
 └── tests/
     ├── prototype.test.mjs        # Tests the actual JavaScript modules and demo flow
     └── test_engine.py            # Original mirrored Python rule tests
@@ -197,6 +227,9 @@ AG_ED-Compass/
 * **Narrative routing**: Classroom keyword routing supports only nail puncture, headache and fever. It is not a general-purpose symptom interpreter.
 * **Synthetic service options**: Clinic availability, opening hours and wait times are not verified or connected to a live service directory.
 * **Local demo provider**: Uses `LocalDemoAgentProvider` for a reliable offline classroom demonstration; no browser-exposed API key or runtime language model is required.
+* **Partial French demonstration**: The patient journey and questions are translated for the prototype; production use would require professional translation, clinical validation and ongoing terminology governance.
+* **Browser-dependent voice support**: Speech recognition availability and microphone permission vary by browser. Audio is handled by the browser and is not intentionally stored by the prototype.
+* **No geolocation or live ranking**: Demonstration communities, distance and availability are synthetic. Location never reduces the clinical urgency assigned by the rule engine.
 
 ---
 

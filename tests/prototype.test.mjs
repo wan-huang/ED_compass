@@ -5,6 +5,8 @@ import { ClinicalRuleEngine } from '../src/clinical/engine.js';
 import { Disposition, Scenario } from '../src/clinical/types.js';
 import { IntakeAgent } from '../src/agents/intakeAgent.js';
 import { FeedbackAgent } from '../src/agents/feedbackAgent.js';
+import { getCareOptions, requiresInPersonAssessment } from '../src/store/facilities.js';
+import { t, questionLabel } from '../src/ui/i18n.js';
 
 test('rust has zero independent decision weight', () => {
   const common = {
@@ -57,6 +59,44 @@ test('safety-surveillance language is flagged by Agent 3', () => {
   assert.equal(result.qualityAnalysis.feedbackStream, 'SAFETY_SURVEILLANCE');
 });
 
+test('access matching preserves urgency and excludes unsafe substitutes', () => {
+  const emergencyOptions = getCareOptions({
+    community: 'victoria',
+    disposition: Disposition.GO_TO_ED_NOW,
+    scenario: Scenario.FEVER
+  });
+  assert.ok(emergencyOptions.length > 0);
+  assert.ok(emergencyOptions.every(option => option.type === 'Emergency Department'));
+  assert.equal(emergencyOptions[0].recommended, true);
+  assert.equal(getCareOptions({
+    community: 'victoria',
+    disposition: Disposition.CALL_911_NOW,
+    scenario: Scenario.HEADACHE
+  }).length, 0);
+
+  const punctureOptions = getCareOptions({
+    community: 'smithers',
+    disposition: Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
+    scenario: Scenario.NAIL_PUNCTURE,
+    answers: { deepPenetration: true }
+  });
+  assert.equal(requiresInPersonAssessment(
+    Scenario.NAIL_PUNCTURE,
+    Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
+    { deepPenetration: true }
+  ), true);
+  assert.ok(punctureOptions.every(option => option.type !== 'Virtual Primary Care'));
+});
+
+test('patient interface supports French labels without changing canonical facts', () => {
+  assert.equal(t('fr', 'patientPortal'), 'Vue patient');
+  assert.match(questionLabel('fr', { id: 'severeBreathingDifficulty', label: 'Fallback' }), /respirer/);
+  assert.equal(
+    questionLabel('en', { id: 'severeBreathingDifficulty', label: 'Original clinical label' }),
+    'Original clinical label'
+  );
+});
+
 test('demo path reaches feedback, dashboard and staff review', async () => {
   const data = new Map();
   globalThis.localStorage = {
@@ -65,7 +105,10 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
     removeItem: key => data.delete(key)
   };
   globalThis.window = {};
-  globalThis.document = { getElementById: () => null };
+  globalThis.document = {
+    body: { classList: { toggle: () => {} } },
+    getElementById: () => null
+  };
 
   const { AppController } = await import('../src/ui/app.js');
   const { SyntheticStore } = await import('../src/store/syntheticStore.js');
@@ -75,8 +118,15 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
 
   app.launchDemoCase('DEMO_A');
   assert.equal(app.patientStep, 'disposition');
+  assert.equal(app.activeTab, 'presenter');
   assert.match(root.innerHTML, /VISIBLE AGENT COLLABORATION/);
-  assert.match(root.innerHTML, /Tetanus assessment/);
+  assert.match(root.innerHTML, /NAIL-U01/);
+
+  app.setTab('patient');
+  assert.doesNotMatch(root.innerHTML, /VISIBLE AGENT COLLABORATION/);
+  assert.doesNotMatch(root.innerHTML, /Inspect structured handoff JSON/);
+  assert.match(root.innerHTML, /Find an appropriate care option/);
+  assert.match(root.innerHTML, /Tetanus vaccination status/);
 
   app.submitPatientFeedback({
     helpful: true,
@@ -118,8 +168,9 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
 
   app.launchDemoCase('DEMO_B');
   assert.equal(app.patientStep, 'emergency_stop');
+  app.setTab('patient');
   const emergency = SyntheticStore.getEncounters().find(e => e.sessionId === app.currentSession.sessionId);
   assert.equal(emergency.disposition, Disposition.CALL_911_NOW);
   assert.equal(emergency.completionStatus, 'RECOMMENDATION_DISPLAYED');
-  assert.match(root.innerHTML, /Submit Feedback & Update Dashboard/);
+  assert.match(root.innerHTML, /Submit feedback/);
 });
