@@ -119,11 +119,24 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   app.launchDemoCase('DEMO_A');
   assert.equal(app.patientStep, 'disposition');
   assert.equal(app.activeTab, 'presenter');
-  assert.match(root.innerHTML, /VISIBLE AGENT COLLABORATION/);
+  assert.match(root.innerHTML, /INTERACTIVE DECISION WALKTHROUGH/);
+  assert.match(root.innerHTML, /Patient’s synthetic opening statement/);
   assert.match(root.innerHTML, /NAIL-U01/);
 
+  app.toggleCollaborationStep('rules');
+  assert.match(root.innerHTML, /DETERMINISTIC FIRST-MATCH LOGIC/);
+  assert.match(root.innerHTML, /Readable decision condition/);
+  assert.match(root.innerHTML, /Disposition output/);
+  assert.match(root.innerHTML, /Rust = Yes is retained as context/);
+  app.toggleCollaborationStep('navigation');
+  assert.match(root.innerHTML, /RULE OUTPUT → ACTIONABLE CARE PLAN/);
+  assert.match(root.innerHTML, /Agent 2 boundary/);
+  app.toggleCollaborationStep('learning');
+  assert.match(root.innerHTML, /DUAL FEEDBACK → GOVERNED IMPROVEMENT/);
+  assert.match(root.innerHTML, /Possible learning opportunity/);
+
   app.setTab('patient');
-  assert.doesNotMatch(root.innerHTML, /VISIBLE AGENT COLLABORATION/);
+  assert.doesNotMatch(root.innerHTML, /INTERACTIVE DECISION WALKTHROUGH/);
   assert.doesNotMatch(root.innerHTML, /Inspect structured handoff JSON/);
   assert.match(root.innerHTML, /Find an appropriate care option/);
   assert.match(root.innerHTML, /Tetanus vaccination status/);

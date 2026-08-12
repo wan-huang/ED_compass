@@ -31,6 +31,8 @@ export class AppController {
     this.accessOptionsVisible = false;
     this.auditFilter = '';
     this.selectedAuditEventId = null;
+    this.currentDemoId = null;
+    this.activeCollaborationStep = 'intake';
     
     // Intake Session State
     this.currentSession = null;
@@ -150,6 +152,7 @@ export class AppController {
     this.currentRuleResult = null;
     this.currentNavigation = null;
     this.currentFeedbackAnalysis = null;
+    this.currentDemoId = null;
     this.accessOptionsVisible = false;
     this.voiceStatus = '';
     this.patientStep = 'consent';
@@ -299,6 +302,8 @@ export class AppController {
     });
 
     this.currentSession = session;
+    this.currentDemoId = demo.id;
+    this.activeCollaborationStep = 'intake';
     this.evaluateSessionAndShowResults();
     this.activeTab = 'presenter';
 
@@ -308,6 +313,13 @@ export class AppController {
       this.patientStep = 'disposition';
     }
 
+    this.render();
+  }
+
+  toggleCollaborationStep(step) {
+    const allowed = ['intake', 'rules', 'navigation', 'learning'];
+    if (!allowed.includes(step)) return;
+    this.activeCollaborationStep = this.activeCollaborationStep === step ? null : step;
     this.render();
   }
 
@@ -427,7 +439,7 @@ export class AppController {
       <footer style="background-color: var(--color-surface); border-top: 1px solid var(--color-border); padding: 1.5rem 0; font-size: 0.85rem; color: var(--color-text-muted);">
         <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
           <div>
-            <strong>ED COMPASS Academic Prototype v1.2</strong> &bull; EMHI1001H
+            <strong>ED COMPASS Academic Prototype v1.3</strong> &bull; EMHI1001H
           </div>
           <div>
             ${t(this.locale, 'conceptual')}
@@ -861,21 +873,94 @@ export class AppController {
   renderAgentCollaboration() {
     const rule = this.currentRuleResult;
     if (!rule) return '';
+    const demo = DEMO_CASES.find(item => item.id === this.currentDemoId);
+    const steps = [
+      { id: 'intake', badge: 'A1', title: 'Listen & Intake', summary: `Structured ${Object.keys(this.currentHandoff?.answers || {}).length} reported facts`, stateClass: 'complete' },
+      { id: 'rules', badge: 'R', title: 'Safety Rules', summary: `Applied ${rule.ruleId} v${rule.ruleVersion}`, stateClass: 'rule' },
+      { id: 'navigation', badge: 'A2', title: 'Care Navigation', summary: 'Explained the approved route and safety net', stateClass: 'complete' },
+      { id: 'learning', badge: 'A3', title: 'Feedback & Learning', summary: 'Patient + provider feedback closes the loop', stateClass: '' }
+    ];
     return `
       <div class="card collaboration-card">
-        <div class="eyebrow">VISIBLE AGENT COLLABORATION</div>
-        <h3>How ED Compass produced this guidance</h3>
-        <div class="collaboration-flow">
-          <div class="collaboration-step complete"><span>A1</span><strong>Listen & Intake</strong><small>Structured ${Object.keys(this.currentHandoff?.answers || {}).length} reported facts</small></div>
-          <div class="flow-arrow">→</div>
-          <div class="collaboration-step rule"><span>R</span><strong>Safety Rules</strong><small>Applied ${escapeHtml(rule.ruleId)} v${escapeHtml(rule.ruleVersion)}</small></div>
-          <div class="flow-arrow">→</div>
-          <div class="collaboration-step complete"><span>A2</span><strong>Care Navigation</strong><small>Explained the approved route and safety net</small></div>
-          <div class="flow-arrow">→</div>
-          <div class="collaboration-step"><span>A3</span><strong>Feedback & Learning</strong><small>Ready to capture patient and provider feedback</small></div>
+        <div class="section-heading-row">
+          <div><div class="eyebrow">INTERACTIVE DECISION WALKTHROUGH</div><h3>How ED Compass produced this guidance</h3></div>
+          <span class="badge badge-info">Click a stage to inspect</span>
         </div>
+        <div class="collaboration-flow">
+          ${steps.map((step, index) => `
+            <button class="collaboration-step ${step.stateClass} ${this.activeCollaborationStep === step.id ? 'active' : ''}" onclick="window.app.toggleCollaborationStep('${step.id}')" aria-expanded="${this.activeCollaborationStep === step.id}">
+              <span>${step.badge}</span><strong>${step.title}</strong><small>${escapeHtml(step.summary)}</small><b class="inspect-cue">${this.activeCollaborationStep === step.id ? 'Hide details ↑' : 'Show details ↓'}</b>
+            </button>
+            ${index < steps.length - 1 ? '<div class="flow-arrow">→</div>' : ''}
+          `).join('')}
+        </div>
+        ${this.renderCollaborationDetail(this.activeCollaborationStep, demo)}
       </div>
     `;
+  }
+
+  renderCollaborationDetail(step, demo) {
+    if (!step) return '<p class="walkthrough-hint">Select any stage above to reveal its inputs, logic, output and governance boundary.</p>';
+    const rule = this.currentRuleResult;
+    const nav = this.currentNavigation;
+    const questions = INTAKE_QUESTIONS[this.currentSession?.scenario] || [];
+    const facts = Object.entries(this.currentHandoff?.answers || {}).map(([key, value]) => {
+      const question = questions.find(item => item.id === key);
+      return `<div class="walkthrough-fact"><span>${escapeHtml(question?.label || humanizeKey(key))}</span><strong>${escapeHtml(formatPresenterValue(value))}</strong></div>`;
+    }).join('');
+
+    if (step === 'intake') {
+      return `
+        <section class="walkthrough-detail" aria-label="Listen and intake details">
+          <div class="walkthrough-heading"><span>A1</span><div><div class="eyebrow">INPUT → STRUCTURED HANDOFF</div><h4>Listen first, then convert the story into validated facts</h4></div></div>
+          <div class="patient-quote"><span>Patient’s synthetic opening statement</span><blockquote>“${escapeHtml(this.currentSession?.narrative || 'No narrative supplied.')}”</blockquote></div>
+          <div class="walkthrough-facts">${facts}</div>
+          <div class="walkthrough-boundary"><strong>Handoff check</strong><span>Schema ${escapeHtml(this.currentHandoff?.schemaVersion)} · ${Object.keys(this.currentHandoff?.answers || {}).length} facts · ${this.currentHandoff?.uncertaintyPresent ? 'Uncertainty retained' : 'No uncertainty recorded'} · No direct identifiers</span></div>
+        </section>`;
+    }
+
+    if (step === 'rules') {
+      return `
+        <section class="walkthrough-detail" aria-label="Safety rule details">
+          <div class="walkthrough-heading"><span>R</span><div><div class="eyebrow">DETERMINISTIC FIRST-MATCH LOGIC</div><h4>${escapeHtml(rule.ruleId)} · ${escapeHtml(rule.ruleName)}</h4></div></div>
+          <div class="rule-logic-box"><span>Readable decision condition</span><p>${escapeHtml(demo?.walkthrough?.ruleLogic || rule.explanationKey)}</p></div>
+          <div class="walkthrough-output-grid">
+            <div><span>Matched facts</span><strong>${(nav?.triggeringFactsFormatted || rule.triggeredBy || []).map(escapeHtml).join(' · ') || 'Pathway fallback'}</strong></div>
+            <div><span>Disposition output</span><strong>${escapeHtml(rule.disposition)}</strong></div>
+            <div><span>Timing</span><strong>${escapeHtml(rule.timing)}</strong></div>
+            <div><span>Destination category</span><strong>${escapeHtml(rule.destinationType)}</strong></div>
+          </div>
+          <div class="walkthrough-boundary warning"><strong>What did not drive the decision</strong><span>${escapeHtml(demo?.walkthrough?.excludedFactor || 'The rule engine does not diagnose and conversational agents cannot override this output.')}</span></div>
+        </section>`;
+    }
+
+    if (step === 'navigation') {
+      return `
+        <section class="walkthrough-detail" aria-label="Care navigation details">
+          <div class="walkthrough-heading"><span>A2</span><div><div class="eyebrow">RULE OUTPUT → ACTIONABLE CARE PLAN</div><h4>${escapeHtml(nav?.headline || '')}</h4></div></div>
+          <p class="walkthrough-summary">${escapeHtml(nav?.summaryText || '')}</p>
+          <div class="navigation-explanation-grid">
+            <div><span>Next actions</span><ol>${(nav?.nextStepActions || []).map(action => `<li>${escapeHtml(action)}</li>`).join('')}</ol></div>
+            <div><span>Safety net</span><ul>${(nav?.safetyNetInstructions || []).map(action => `<li>${escapeHtml(action)}</li>`).join('')}</ul></div>
+          </div>
+          <div class="walkthrough-boundary"><strong>Agent 2 boundary</strong><span>It explains rule ${escapeHtml(rule.ruleId)}; it cannot lower urgency, change the destination category, diagnose a condition or transmit information to a service.</span></div>
+          <button class="btn btn-secondary walkthrough-action" onclick="window.app.setTab('patient')">Open the patient-facing result →</button>
+        </section>`;
+    }
+
+    return `
+      <section class="walkthrough-detail" aria-label="Feedback and learning details">
+        <div class="walkthrough-heading"><span>A3</span><div><div class="eyebrow">DUAL FEEDBACK → GOVERNED IMPROVEMENT</div><h4>Close the loop without automatically changing a clinical rule</h4></div></div>
+        <div class="feedback-example-grid">
+          <article><span>Patient feedback example</span><p>${escapeHtml(demo?.walkthrough?.samplePatientFeedback || 'Patient rates clarity, trust, feasibility and reports possible safety or access concerns.')}</p></article>
+          <article><span>Provider review example</span><p>${escapeHtml(demo?.walkthrough?.sampleProviderReview || 'A provider reviews disposition, essential questions, explanation quality and possible safety concerns.')}</p></article>
+        </div>
+        <div class="learning-loop">
+          <div><span>1</span><strong>Capture</strong><small>Experience + safety streams</small></div><i>→</i><div><span>2</span><strong>Classify</strong><small>Theme, barrier or safety flag</small></div><i>→</i><div><span>3</span><strong>Human review</strong><small>Clinical and operational assessment</small></div><i>→</i><div><span>4</span><strong>Test + approve</strong><small>Versioned release and monitoring</small></div>
+        </div>
+        <div class="walkthrough-boundary success"><strong>Possible learning opportunity</strong><span>${escapeHtml(demo?.walkthrough?.learningOpportunity || 'Aggregate feedback can create a proposed improvement item for human review.')}</span></div>
+        <div class="walkthrough-actions"><button class="btn btn-secondary" onclick="window.app.setTab('staff')">Open Learning Dashboard</button><button class="btn btn-secondary" onclick="window.app.setTab('improvements')">Open Governance QI</button><button class="btn btn-secondary" onclick="window.app.auditFilter='${escapeForJs(this.currentSession?.sessionId || '')}'; window.app.setTab('audit')">View Audit Trail</button></div>
+      </section>`;
   }
 
   renderFeedbackForm(compact = false) {
@@ -1354,6 +1439,20 @@ function ratingOptions() {
   return [5, 4, 3, 2, 1]
     .map(value => `<option value="${value}" ${value === 5 ? 'selected' : ''}>${value}</option>`)
     .join('');
+}
+
+function humanizeKey(value) {
+  return String(value || '')
+    .replace(/([A-Z])/g, ' $1')
+    .replaceAll('_', ' ')
+    .replace(/^./, character => character.toUpperCase());
+}
+
+function formatPresenterValue(value) {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  if (value === null || value === undefined || value === '') return 'Uncertain / not provided';
+  return humanizeKey(value);
 }
 
 function localizeNavigation(locale, navigation, disposition) {
