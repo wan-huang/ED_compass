@@ -10,6 +10,8 @@ import { SyntheticStore } from '../store/syntheticStore.js';
 import { AuditLogger, AuditEventType } from '../store/auditLogger.js';
 import { DEMO_CASES } from '../store/demoCases.js';
 import { ImprovementStatus } from '../agents/types.js';
+import { t, questionLabel, optionLabel } from './i18n.js';
+import { DEMO_COMMUNITIES, getCareOptions, requiresInPersonAssessment } from '../store/facilities.js';
 
 export class AppController {
   constructor(rootContainer) {
@@ -17,9 +19,18 @@ export class AppController {
     this.provider = getAgentProvider();
     
     // Application State
-    this.activeTab = 'patient'; // 'patient' | 'staff' | 'improvements' | 'architecture'
+    this.activeTab = 'patient'; // 'patient' | 'presenter' | 'staff' | 'improvements' | 'audit' | 'architecture'
     this.patientStep = 'landing'; // 'landing' | 'consent' | 'concern_input' | 'intake' | 'emergency_stop' | 'review' | 'disposition' | 'complete'
     this.narrativeError = '';
+    this.locale = localStorage.getItem('ed_compass_locale') || 'en';
+    this.plainLanguage = localStorage.getItem('ed_compass_plain_language') === 'true';
+    this.voiceStatus = '';
+    this.recognition = null;
+    this.accessCommunity = 'victoria';
+    this.accessBarrier = '';
+    this.accessOptionsVisible = false;
+    this.auditFilter = '';
+    this.selectedAuditEventId = null;
     
     // Intake Session State
     this.currentSession = null;
@@ -44,6 +55,8 @@ export class AppController {
   }
 
   init() {
+    AuditLogger.seedDemonstrationLogs();
+    document.body?.classList?.toggle('plain-language-mode', this.plainLanguage);
     this.render();
   }
 
@@ -54,13 +67,91 @@ export class AppController {
     this.render();
   }
 
+  setLocale(locale) {
+    this.locale = locale === 'fr' ? 'fr' : 'en';
+    localStorage.setItem('ed_compass_locale', this.locale);
+    AuditLogger.logEvent(AuditEventType.LANGUAGE_SELECTED, this.currentSession?.sessionId || 'UI', { locale: this.locale }, 'Patient');
+    this.render();
+  }
+
+  togglePlainLanguage(enabled) {
+    this.plainLanguage = Boolean(enabled);
+    localStorage.setItem('ed_compass_plain_language', String(this.plainLanguage));
+    document.body?.classList?.toggle('plain-language-mode', this.plainLanguage);
+    this.render();
+  }
+
+  startVoiceInput() {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      this.voiceStatus = t(this.locale, 'voiceUnavailable');
+      this.render();
+      return;
+    }
+    const textarea = document.getElementById('concern');
+    this.recognition = new Recognition();
+    this.recognition.lang = this.locale === 'fr' ? 'fr-CA' : 'en-CA';
+    this.recognition.interimResults = true;
+    this.recognition.continuous = false;
+    this.voiceStatus = t(this.locale, 'stopListening');
+    AuditLogger.logEvent(AuditEventType.VOICE_INPUT_STARTED, 'VOICE-INPUT', { locale: this.locale }, 'Patient');
+    this.recognition.onresult = event => {
+      const transcript = Array.from(event.results).map(result => result[0].transcript).join(' ');
+      if (textarea) textarea.value = transcript;
+      if (event.results[event.results.length - 1].isFinal) {
+        this.voiceStatus = t(this.locale, 'voiceHint');
+        AuditLogger.logEvent(AuditEventType.VOICE_TRANSCRIPT_CONFIRMED, 'VOICE-INPUT', {
+          locale: this.locale,
+          characterCount: transcript.length
+        }, 'Patient');
+      }
+    };
+    this.recognition.onerror = () => {
+      this.voiceStatus = t(this.locale, 'voiceDenied');
+      this.render();
+    };
+    this.recognition.onend = () => {
+      if (this.voiceStatus === t(this.locale, 'stopListening')) this.voiceStatus = t(this.locale, 'voiceHint');
+      const status = document.getElementById('voice-status');
+      if (status) status.textContent = this.voiceStatus;
+    };
+    this.recognition.start();
+    this.renderVoiceStatus();
+  }
+
+  renderVoiceStatus() {
+    const status = document.getElementById('voice-status');
+    if (status) status.textContent = this.voiceStatus;
+  }
+
+  speakText(text) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(String(text || '').replace(/<[^>]+>/g, ' '));
+    utterance.lang = this.locale === 'fr' ? 'fr-CA' : 'en-CA';
+    window.speechSynthesis.speak(utterance);
+  }
+
+  showAccessOptions(community, barrier) {
+    this.accessCommunity = DEMO_COMMUNITIES[community] ? community : 'victoria';
+    this.accessBarrier = barrier || '';
+    this.accessOptionsVisible = true;
+    AuditLogger.logEvent(AuditEventType.ACCESS_OPTIONS_DISPLAYED, this.currentSession?.sessionId || 'ACCESS', {
+      community: this.accessCommunity,
+      barrier: this.accessBarrier,
+      disposition: this.currentRuleResult?.disposition
+    }, 'Patient');
+    this.render();
+  }
+
   startNewPatientSession() {
-    const sessionId = `EDC-${Date.now().toString().slice(-6)}`;
     this.currentSession = null;
     this.currentHandoff = null;
     this.currentRuleResult = null;
     this.currentNavigation = null;
     this.currentFeedbackAnalysis = null;
+    this.accessOptionsVisible = false;
+    this.voiceStatus = '';
     this.patientStep = 'consent';
     this.render();
   }
@@ -76,17 +167,22 @@ export class AppController {
     const normalized = cleaned.toLowerCase();
     let scenario = null;
 
-    if (/\b(nail|puncture|sharp object|stepped on)\b/.test(normalized)) scenario = Scenario.NAIL_PUNCTURE;
-    else if (/\b(headache|head pain|migraine|thunderclap)\b/.test(normalized)) scenario = Scenario.HEADACHE;
-    else if (/\b(fever|temperature|chills|feverish)\b/.test(normalized)) scenario = Scenario.FEVER;
+    if (/\b(nail|puncture|sharp object|stepped on|clou|perforation|objet pointu|march[eé] sur)\b/.test(normalized)) scenario = Scenario.NAIL_PUNCTURE;
+    else if (/\b(headache|head pain|migraine|thunderclap|mal de t[eê]te|c[eé]phal[eé]e)\b/.test(normalized)) scenario = Scenario.HEADACHE;
+    else if (/\b(fever|temperature|chills|feverish|fi[eè]vre|frissons)\b/.test(normalized)) scenario = Scenario.FEVER;
 
     if (!scenario) {
-      this.narrativeError = 'For this classroom prototype, please describe a nail puncture, headache, or fever.';
+      this.narrativeError = t(this.locale, 'unsupportedConcern');
       this.render();
       return;
     }
 
     this.narrativeError = '';
+    AuditLogger.logEvent(AuditEventType.CONCERN_NARRATIVE_SUBMITTED, 'CONCERN', {
+      inputMethod: this.voiceStatus ? 'voice_or_voice_assisted' : 'text',
+      locale: this.locale,
+      characterCount: cleaned.length
+    }, 'Patient');
     this.selectScenario(scenario, cleaned);
   }
 
@@ -204,7 +300,7 @@ export class AppController {
 
     this.currentSession = session;
     this.evaluateSessionAndShowResults();
-    this.activeTab = 'patient';
+    this.activeTab = 'presenter';
 
     if (session.emergencyStopDetected) {
       this.patientStep = 'emergency_stop';
@@ -257,6 +353,7 @@ export class AppController {
   resetDemoData() {
     SyntheticStore.resetToDefaults();
     AuditLogger.clearLogs();
+    AuditLogger.seedDemonstrationLogs();
     this.activeModal = null;
     this.selectedEncounterId = null;
     this.dashboardFilters = { scenario: 'ALL', disposition: 'ALL', safetyFlag: 'ALL', reviewStatus: 'ALL' };
@@ -269,6 +366,16 @@ export class AppController {
     this.render();
   }
 
+  setAuditFilter(value) {
+    this.auditFilter = String(value || '');
+    this.render();
+  }
+
+  inspectAuditEvent(eventId) {
+    this.selectedAuditEventId = eventId;
+    this.render();
+  }
+
   // --- RENDERING VIEWS ---
 
   render() {
@@ -276,13 +383,19 @@ export class AppController {
 
     if (this.activeTab === 'patient') {
       mainContentHtml = this.renderPatientView();
+    } else if (this.activeTab === 'presenter') {
+      mainContentHtml = this.renderPresenterConsole();
     } else if (this.activeTab === 'staff') {
       mainContentHtml = this.renderStaffDashboard();
     } else if (this.activeTab === 'improvements') {
       mainContentHtml = this.renderGovernanceView();
     } else if (this.activeTab === 'architecture') {
       mainContentHtml = this.renderArchitectureView();
+    } else if (this.activeTab === 'audit') {
+      mainContentHtml = this.renderAuditLog();
     }
+
+    const isPatient = this.activeTab === 'patient';
 
     const html = `
       <header class="app-header">
@@ -294,28 +407,18 @@ export class AppController {
               <div class="brand-subtitle">Governed Digital Front Door for Emergency Navigation</div>
             </div>
           </a>
-          <nav class="nav-tabs">
-            <button class="nav-tab ${this.activeTab === 'patient' ? 'active' : ''}" onclick="window.app.setTab('patient')">
-              Patient Portal
-            </button>
-            <button class="nav-tab ${this.activeTab === 'staff' ? 'active' : ''}" onclick="window.app.setTab('staff')">
-              Staff Dashboard
-            </button>
-            <button class="nav-tab ${this.activeTab === 'improvements' ? 'active' : ''}" onclick="window.app.setTab('improvements')">
-              Governance QI (${SyntheticStore.calculateMetrics().openImprovementItems})
-            </button>
-            <button class="nav-tab ${this.activeTab === 'architecture' ? 'active' : ''}" onclick="window.app.setTab('architecture')">
-              How It Works
-            </button>
-          </nav>
+          <div class="experience-switch" aria-label="Choose application experience">
+            <button class="experience-option ${isPatient ? 'active' : ''}" onclick="window.app.setTab('patient')">👤 ${t(this.locale, 'patientPortal')}</button>
+            <button class="experience-option ${!isPatient ? 'active' : ''}" onclick="window.app.setTab('presenter')">🛠 ${t(this.locale, 'presenterConsole')}</button>
+          </div>
         </div>
         <div class="academic-banner">
-          <span class="academic-badge">Academic Prototype</span>
-          <span>University of Toronto EMHI1001H Project &bull; Does NOT diagnose patients &bull; For a life-threatening emergency, call 911</span>
+          <span class="academic-badge">${this.locale === 'fr' ? 'Prototype universitaire' : 'Academic Prototype'}</span>
+          <span>${this.locale === 'fr' ? 'Projet EMHI1001H de l’Université de Toronto &bull; Ne pose PAS de diagnostic &bull; En cas d’urgence vitale, composez le 911' : 'University of Toronto EMHI1001H Project &bull; Does NOT diagnose patients &bull; For a life-threatening emergency, call 911'}</span>
         </div>
       </header>
 
-      ${this.renderDemoBar()}
+      ${isPatient ? this.renderPatientUtilityBar() : this.renderPresenterNavigation()}
 
       <main class="container" style="padding-top: 2rem; padding-bottom: 4rem; flex: 1;">
         ${mainContentHtml}
@@ -324,10 +427,10 @@ export class AppController {
       <footer style="background-color: var(--color-surface); border-top: 1px solid var(--color-border); padding: 1.5rem 0; font-size: 0.85rem; color: var(--color-text-muted);">
         <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
           <div>
-            <strong>ED COMPASS Academic Prototype v1.0</strong> &bull; EMHI1001H &bull; Deterministic Clinical Protocol Enabled
+            <strong>ED COMPASS Academic Prototype v1.2</strong> &bull; EMHI1001H
           </div>
           <div>
-            Conceptual handoff only—no information has been transmitted.
+            ${t(this.locale, 'conceptual')}
           </div>
         </div>
       </footer>
@@ -338,21 +441,59 @@ export class AppController {
     this.root.innerHTML = html;
   }
 
-  renderDemoBar() {
+  renderPatientUtilityBar() {
     return `
-      <div style="background-color: var(--color-surface-hover); border-bottom: 1px solid var(--color-border); padding: 0.75rem 0;">
-        <div class="container" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
-          <div style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-secondary); display: flex; align-items: center; gap: 0.5rem;">
-            <span>⚡ DEMO QUICK LAUNCH:</span>
+      <div class="patient-utility-bar">
+        <div class="container utility-inner">
+          <div class="language-control" aria-label="${t(this.locale, 'language')}">
+            <span>🌐 ${t(this.locale, 'language')}:</span>
+            <button class="utility-button ${this.locale === 'en' ? 'active' : ''}" onclick="window.app.setLocale('en')">English</button>
+            <button class="utility-button ${this.locale === 'fr' ? 'active' : ''}" onclick="window.app.setLocale('fr')">Français</button>
           </div>
-          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            ${DEMO_CASES.map(demo => `
-              <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.75rem;" onclick="window.app.launchDemoCase('${demo.id}')">
-                ${demo.title.split(':')[0]}
-              </button>
-            `).join('')}
-          </div>
+          <label class="plain-language-toggle"><input type="checkbox" ${this.plainLanguage ? 'checked' : ''} onchange="window.app.togglePlainLanguage(this.checked)" /> ${t(this.locale, 'plainLanguage')}</label>
         </div>
+      </div>
+    `;
+  }
+
+  renderPresenterNavigation() {
+    return `
+      <div class="presenter-nav-wrap">
+        <div class="container presenter-nav">
+          <button class="presenter-tab ${this.activeTab === 'presenter' ? 'active' : ''}" onclick="window.app.setTab('presenter')">Demo Console</button>
+          <button class="presenter-tab ${this.activeTab === 'staff' ? 'active' : ''}" onclick="window.app.setTab('staff')">Learning Dashboard</button>
+          <button class="presenter-tab ${this.activeTab === 'improvements' ? 'active' : ''}" onclick="window.app.setTab('improvements')">Governance QI (${SyntheticStore.calculateMetrics().openImprovementItems})</button>
+          <button class="presenter-tab ${this.activeTab === 'audit' ? 'active' : ''}" onclick="window.app.setTab('audit')">Audit Log</button>
+          <button class="presenter-tab ${this.activeTab === 'architecture' ? 'active' : ''}" onclick="window.app.setTab('architecture')">Architecture</button>
+        </div>
+      </div>
+    `;
+  }
+
+  renderPresenterConsole() {
+    const activeCase = this.currentRuleResult ? `
+      <div class="card presenter-inspector">
+        <div class="section-heading-row"><div><div class="eyebrow">CURRENT DEMONSTRATION</div><h3>Decision provenance</h3></div><span class="badge badge-info">${escapeHtml(this.currentSession?.sessionId || '')}</span></div>
+        <div class="inspector-grid">
+          <div><span>Pathway</span><strong>${escapeHtml(this.currentSession?.scenario || '')}</strong></div>
+          <div><span>Disposition</span><strong>${escapeHtml(this.currentRuleResult.disposition)}</strong></div>
+          <div><span>Rule</span><strong>${escapeHtml(this.currentRuleResult.ruleId)} v${escapeHtml(this.currentRuleResult.ruleVersion)}</strong></div>
+          <div><span>Agent handoff</span><strong>${Object.keys(this.currentHandoff?.answers || {}).length} structured facts</strong></div>
+        </div>
+        ${this.renderAgentCollaboration()}
+        <details class="technical-details"><summary>Inspect structured handoff JSON</summary><pre>${escapeHtml(JSON.stringify(this.currentHandoff, null, 2))}</pre></details>
+      </div>
+    ` : '';
+    return `
+      <div class="presenter-page">
+        <div class="presenter-hero">
+          <div><div class="eyebrow">PRESENTER CONSOLE</div><h1>Classroom demonstration controls</h1><p>Technical details and shortcuts stay here, separate from the patient experience.</p></div>
+          <button class="btn btn-primary" onclick="window.app.setTab('patient'); window.app.startNewPatientSession();">Open a fresh patient journey →</button>
+        </div>
+        <div class="demo-card-grid">
+          ${DEMO_CASES.map(demo => `<button class="demo-launch-card" onclick="window.app.launchDemoCase('${demo.id}')"><span>${demo.title.split(':')[0]}</span><strong>${escapeHtml(demo.title.split(':').slice(1).join(':').trim())}</strong><small>${escapeHtml(demo.subtitle)}</small></button>`).join('')}
+        </div>
+        ${activeCase}
       </div>
     `;
   }
@@ -361,30 +502,18 @@ export class AppController {
     switch (this.patientStep) {
       case 'landing':
         return `
-          <div class="container-narrow text-center" style="text-align: center; padding: 2rem 0;">
-            <div style="display: inline-flex; padding: 1rem; background-color: var(--color-primary-light); color: var(--color-primary-dark); border-radius: var(--radius-full); margin-bottom: 1.5rem; font-size: 2rem;">
-              🩺
+          <div class="patient-landing">
+            <div class="patient-hero-copy">
+              <div class="eyebrow">${t(this.locale, 'noWrongDoor')}</div>
+              <h1>${t(this.locale, 'landingTitle')}</h1>
+              <p>${t(this.locale, 'landingLead')}</p>
+              <button class="btn btn-primary btn-lg" onclick="window.app.startNewPatientSession()">${t(this.locale, 'start')} →</button>
             </div>
-            <h1 style="font-family: var(--font-heading); font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; color: var(--color-text-primary);">
-              Emergency Care Navigation
-            </h1>
-            <p style="font-size: 1.15rem; color: var(--color-text-secondary); margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto;">
-              ED Compass helps you assess your current symptoms, identify potential emergency warning signs, and navigate to the right level of care.
-            </p>
-
-            <div class="card" style="text-align: left; background: var(--color-surface); margin-bottom: 2rem;">
-              <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">ED Compass helps answer:</h3>
-              <ul style="padding-left: 1.25rem; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem;">
-                <li>Does my situation contain an emergency warning sign?</li>
-                <li>What level of care should I consider next?</li>
-                <li>Why is that recommendation being made?</li>
-                <li>What warning signs should cause me to escalate?</li>
-              </ul>
+            <div class="patient-promise-card" aria-label="Patient experience principles">
+              <div><span>1</span><strong>${this.locale === 'fr' ? 'Vous êtes entendu' : 'You are heard'}</strong><small>${this.locale === 'fr' ? 'Commencez avec vos propres mots.' : 'Start in your own words.'}</small></div>
+              <div><span>2</span><strong>${this.locale === 'fr' ? 'La sécurité d’abord' : 'Safety first'}</strong><small>${this.locale === 'fr' ? 'Les signes d’urgence interrompent les autres questions.' : 'Emergency signs stop routine questions.'}</small></div>
+              <div><span>3</span><strong>${this.locale === 'fr' ? 'Une prochaine étape claire' : 'A clear next step'}</strong><small>${this.locale === 'fr' ? 'Comprenez où aller et quand obtenir plus d’aide.' : 'Know where to go and when to get more help.'}</small></div>
             </div>
-
-            <button class="btn btn-primary btn-lg" onclick="window.app.startNewPatientSession()">
-              Start Safety Assessment &rarr;
-            </button>
           </div>
         `;
 
@@ -392,23 +521,19 @@ export class AppController {
         return `
           <div class="container-narrow">
             <div class="card">
-              <h2 style="font-family: var(--font-heading); font-size: 1.75rem; margin-bottom: 1rem;">Academic Prototype Terms & Consent</h2>
+              <h2 style="font-family: var(--font-heading); font-size: 1.75rem; margin-bottom: 1rem;">${t(this.locale, 'consentTitle')}</h2>
               <div style="background-color: var(--color-warning-bg); border-left: 4px solid var(--color-warning); padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; font-size: 0.9rem; color: #78350F;">
-                <strong>IMPORTANT NOTICE:</strong> This application is a non-clinical academic prototype built for University of Toronto EMHI1001H. It does NOT replace 911, Emergency Departments, or 8-1-1 HealthLink BC.
+                <strong>${this.locale === 'fr' ? 'AVIS IMPORTANT' : 'IMPORTANT NOTICE'}:</strong> ${t(this.locale, 'consentNotice')}
               </div>
 
               <div style="font-size: 0.95rem; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2rem;">
-                <p>By proceeding, you acknowledge that:</p>
-                <ul style="padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem;">
-                  <li>This system provides automated navigation protocol evaluation, not a medical diagnosis.</li>
-                  <li>No personal health numbers (PHN) or real names are collected or transmitted.</li>
-                  <li>In a life-threatening emergency, you should call 911 immediately.</li>
-                </ul>
+                <p>${t(this.locale, 'consentPrivacy')}</p>
+                <p><strong>${t(this.locale, 'emergencyNotice')}</strong></p>
               </div>
 
               <div style="display: flex; gap: 1rem;">
                 <button class="btn btn-primary btn-lg btn-full" onclick="window.app.acceptConsent()">
-                  I Understand & Agree
+                  ${t(this.locale, 'agree')}
                 </button>
               </div>
             </div>
@@ -418,28 +543,29 @@ export class AppController {
       case 'concern_input':
         return `
           <div class="container-narrow">
-            <div class="eyebrow">NO WRONG DOOR</div>
-            <h2 style="font-family: var(--font-heading); font-size: 1.9rem; margin-bottom: 0.5rem;">Tell us what is happening</h2>
-            <p style="color: var(--color-text-muted); margin-bottom: 1.5rem;">You do not need to know which healthcare service to choose before asking for help.</p>
+            <div class="eyebrow">${t(this.locale, 'noWrongDoor')}</div>
+            <h2 style="font-family: var(--font-heading); font-size: 1.9rem; margin-bottom: 0.5rem;">${t(this.locale, 'concernTitle')}</h2>
+            <p style="color: var(--color-text-muted); margin-bottom: 1.5rem;">${t(this.locale, 'concernLead')}</p>
 
             <div class="card narrative-card">
               <form onsubmit="event.preventDefault(); window.app.submitConcernNarrative(this.concern.value);">
-                <label class="form-label" for="concern">Describe the main concern in your own words</label>
-                <textarea id="concern" name="concern" class="form-textarea" rows="4" required placeholder="For example: I stepped on a nail through my shoe and I am worried about tetanus."></textarea>
+                <label class="form-label" for="concern">${t(this.locale, 'concernLabel')}</label>
+                <textarea id="concern" name="concern" class="form-textarea" rows="4" required placeholder="${t(this.locale, 'concernPlaceholder')}"></textarea>
+                <div class="voice-controls"><button type="button" class="btn btn-secondary" onclick="window.app.startVoiceInput()">🎙 ${t(this.locale, 'speak')}</button><span id="voice-status" aria-live="polite">${escapeHtml(this.voiceStatus || t(this.locale, 'voiceHint'))}</span></div>
                 ${this.narrativeError ? `<div class="inline-error" role="alert">${escapeHtml(this.narrativeError)}</div>` : ''}
-                <button type="submit" class="btn btn-primary btn-lg btn-full" style="margin-top: 1rem;">Continue with Safety Intake &rarr;</button>
+                <button type="submit" class="btn btn-primary btn-lg btn-full" style="margin-top: 1rem;">${t(this.locale, 'continue')} →</button>
               </form>
             </div>
 
             <div class="example-grid" aria-label="Classroom example concerns">
-              <button class="example-story" onclick="window.app.submitConcernNarrative('I stepped on a nail through my running shoe and I am not sure about my last tetanus shot.')">
-                <span>🦶</span><strong>Nail puncture</strong><small>Wound and tetanus next steps</small>
+              <button class="example-story" onclick="window.app.submitConcernNarrative('${this.locale === 'fr' ? 'J’ai marché sur un clou à travers ma chaussure et je ne connais pas la date de mon dernier vaccin contre le tétanos.' : 'I stepped on a nail through my running shoe and I am not sure about my last tetanus shot.'}')">
+                <span>🦶</span><strong>${t(this.locale, 'nail')}</strong><small>${t(this.locale, 'nailHelp')}</small>
               </button>
-              <button class="example-story" onclick="window.app.submitConcernNarrative('I suddenly developed the worst headache of my life.')">
-                <span>🤕</span><strong>Sudden headache</strong><small>Emergency warning-sign check</small>
+              <button class="example-story" onclick="window.app.submitConcernNarrative('${this.locale === 'fr' ? 'J’ai soudainement le pire mal de tête de ma vie.' : 'I suddenly developed the worst headache of my life.'}')">
+                <span>🤕</span><strong>${t(this.locale, 'headache')}</strong><small>${t(this.locale, 'headacheHelp')}</small>
               </button>
-              <button class="example-story" onclick="window.app.submitConcernNarrative('I have had a fever since yesterday and do not know where to seek care.')">
-                <span>🤒</span><strong>Fever</strong><small>Risk and care-setting navigation</small>
+              <button class="example-story" onclick="window.app.submitConcernNarrative('${this.locale === 'fr' ? 'J’ai de la fièvre depuis hier et je ne sais pas où recevoir des soins.' : 'I have had a fever since yesterday and do not know where to seek care.'}')">
+                <span>🤒</span><strong>${t(this.locale, 'fever')}</strong><small>${t(this.locale, 'feverHelp')}</small>
               </button>
             </div>
           </div>
@@ -461,13 +587,12 @@ export class AppController {
         return `
           <div class="container-narrow text-center" style="padding: 2rem 0; text-align: center;">
             <div style="font-size: 3rem; margin-bottom: 1rem;">✅</div>
-            <h2 style="font-family: var(--font-heading); font-size: 2rem; margin-bottom: 1rem;">Assessment Complete</h2>
+            <h2 style="font-family: var(--font-heading); font-size: 2rem; margin-bottom: 1rem;">${t(this.locale, 'completeTitle')}</h2>
             <p style="color: var(--color-text-secondary); margin-bottom: 2rem;">
-              Thank you for completing the safety navigation assessment and providing feedback.
+              ${t(this.locale, 'completeLead')}
             </p>
             <div style="display:flex; gap:0.75rem; justify-content:center; flex-wrap:wrap;">
-              <button class="btn btn-primary btn-lg" onclick="window.app.setTab('staff')">Open Learning Dashboard &rarr;</button>
-              <button class="btn btn-secondary btn-lg" onclick="window.app.startNewPatientSession()">Start Another Assessment</button>
+              <button class="btn btn-primary btn-lg" onclick="window.app.startNewPatientSession()">${t(this.locale, 'another')}</button>
             </div>
           </div>
         `;
@@ -483,21 +608,26 @@ export class AppController {
     if (!currentQ) return '';
 
     const progressPct = Math.round(((idx + 1) / questions.length) * 100);
+    const phaseIndex = progressPct < 35 ? 0 : progressPct < 80 ? 1 : 2;
+    const phases = [t(this.locale, 'progressSafety'), t(this.locale, 'progressDetails'), t(this.locale, 'progressReview'), t(this.locale, 'progressPlan')];
 
     return `
       <div class="container-narrow">
         ${this.currentSession.narrative ? `
-          <div class="agent-listening-card">
-            <div class="agent-avatar">A1</div>
-            <div><strong>I hear that you are concerned about:</strong><br>${escapeHtml(this.currentSession.narrative)}</div>
+          <div class="agent-listening-card patient-listening-card">
+            <div class="patient-listening-icon">✓</div>
+            <div><strong>${t(this.locale, 'heard')}</strong><br>${escapeHtml(this.currentSession.narrative)}</div>
           </div>
         ` : ''}
+        <div class="patient-progress" aria-label="Assessment progress">
+          ${phases.map((phase, index) => `<div class="patient-progress-step ${index < phaseIndex ? 'complete' : index === phaseIndex ? 'current' : ''}"><span></span><small>${phase}</small></div>`).join('')}
+        </div>
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
           <span style="font-size: 0.85rem; font-weight: 600; color: var(--color-primary-dark); text-transform: uppercase;">
-            ${currentQ.category} &bull; Question ${idx + 1} of ${questions.length}
+            ${t(this.locale, 'question')} ${idx + 1} ${t(this.locale, 'of')} ${questions.length}
           </span>
           <button class="btn btn-danger" style="font-size: 0.75rem; padding: 0.3rem 0.6rem;" onclick="alert('In a severe life-threatening emergency, call 911 immediately.')">
-            🚨 Emergency Help (911)
+            🚨 ${this.locale === 'fr' ? 'Aide d’urgence (911)' : 'Emergency Help (911)'}
           </button>
         </div>
 
@@ -507,31 +637,32 @@ export class AppController {
 
         <div class="card" style="margin-top: 1.5rem;">
           <h2 style="font-family: var(--font-heading); font-size: 1.4rem; font-weight: 600; margin-bottom: 1.5rem;">
-            ${currentQ.label}
+            ${questionLabel(this.locale, currentQ)}
           </h2>
+          <button class="read-aloud-button" onclick="window.app.speakText('${escapeForJs(questionLabel(this.locale, currentQ))}')">🔊 ${t(this.locale, 'readQuestion')}</button>
 
           ${currentQ.type === 'boolean' ? `
             <div class="option-button-grid">
               <button class="btn btn-secondary btn-lg" onclick="window.app.answerQuestion('${currentQ.id}', true)">
-                YES
+                ${t(this.locale, 'yes')}
               </button>
               <button class="btn btn-secondary btn-lg" onclick="window.app.answerQuestion('${currentQ.id}', false)">
-                NO
+                ${t(this.locale, 'no')}
               </button>
               <button class="btn btn-secondary btn-lg" style="grid-column: 1 / -1; background-color: var(--color-bg);" onclick="window.app.answerQuestion('${currentQ.id}', null, true)">
-                I'm Not Sure
+                ${t(this.locale, 'unsure')}
               </button>
             </div>
           ` : `
             <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
               ${currentQ.options.map(opt => `
                 <button class="option-card" onclick="window.app.answerQuestion('${currentQ.id}', '${opt.value}')">
-                  <span>${opt.label}</span>
+                  <span>${optionLabel(this.locale, opt)}</span>
                   <span>&rarr;</span>
                 </button>
               `).join('')}
               <button class="btn btn-secondary" style="margin-top: 0.5rem;" onclick="window.app.answerQuestion('${currentQ.id}', 'unknown', true)">
-                I'm Not Sure
+                ${t(this.locale, 'unsure')}
               </button>
             </div>
           `}
@@ -540,18 +671,17 @@ export class AppController {
         <div style="display: flex; justify-content: space-between; align-items: center;">
           ${idx > 0 ? `
             <button class="btn btn-secondary" onclick="window.app.currentSession.currentQuestionIndex--; window.app.render();">
-              &larr; Back
+              ← ${t(this.locale, 'back')}
             </button>
           ` : '<div></div>'}
-          <span style="font-size: 0.8rem; color: var(--color-text-muted);">ED Compass Agent 1 (Safety Intake)</span>
+          <span style="font-size: 0.8rem; color: var(--color-text-muted);">${t(this.locale, 'patientOnly')}</span>
         </div>
       </div>
     `;
   }
 
   renderEmergencyStop() {
-    const nav = this.currentNavigation;
-    const rule = this.currentRuleResult;
+    const nav = localizeNavigation(this.locale, this.currentNavigation, this.currentRuleResult?.disposition);
 
     return `
       <div class="container-narrow">
@@ -559,7 +689,7 @@ export class AppController {
           <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
             <div style="font-size: 2.5rem;">🚨</div>
             <div>
-              <span class="badge badge-danger-severe">EMERGENCY STOP TRIGGERED</span>
+              <span class="badge badge-danger-severe">${t(this.locale, 'emergencyTitle')}</span>
               <h1 style="font-family: var(--font-heading); font-size: 2rem; margin-top: 0.25rem;">
                 ${nav?.headline || 'Call 911 Immediately'}
               </h1>
@@ -568,30 +698,28 @@ export class AppController {
           <p style="font-size: 1.1rem; line-height: 1.6; margin-bottom: 1.5rem; opacity: 0.95;">
             ${nav?.summaryText}
           </p>
+          <p class="emergency-stop-explanation">${t(this.locale, 'emergencyStop')}</p>
 
           <div style="background-color: rgba(0,0,0,0.2); padding: 1.25rem; border-radius: var(--radius-md); margin-bottom: 1.5rem;">
-            <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.5rem; text-transform: uppercase;">Required Action:</h4>
+            <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.5rem; text-transform: uppercase;">${t(this.locale, 'next')}:</h4>
             <ul style="padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem;">
               ${nav?.nextStepActions.map(act => `<li>${act}</li>`).join('')}
             </ul>
           </div>
 
-          <div style="font-size: 0.8rem; opacity: 0.8; text-align: center;">
-            Rule ID: ${rule?.ruleId} v${rule?.ruleVersion} &bull; Deterministic Engine Evaluation
-          </div>
+          <button class="read-aloud-button light" onclick="window.app.speakText('${escapeForJs(`${nav?.headline}. ${nav?.summaryText}. ${nav?.nextStepActions.join('. ')}`)}')">🔊 ${t(this.locale, 'readPlan')}</button>
         </div>
 
         <div class="card">
-          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">Safety Instructions</h3>
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">${t(this.locale, 'safetyNet')}</h3>
           <ul style="padding-left: 1.25rem; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem;">
             ${nav?.safetyNetInstructions.map(instr => `<li>${instr}</li>`).join('')}
           </ul>
           <div style="background-color: var(--color-bg); padding: 0.75rem; border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--color-text-muted);">
-            ⚠️ ${nav?.conceptualHandoffWarning}
+            ⚠️ ${t(this.locale, 'conceptual')}
           </div>
         </div>
 
-        ${this.renderAgentCollaboration()}
         ${this.renderFeedbackForm(true)}
       </div>
     `;
@@ -603,23 +731,24 @@ export class AppController {
 
     return `
       <div class="container-narrow">
-        <h2 style="font-family: var(--font-heading); font-size: 1.75rem; margin-bottom: 0.5rem;">Review Your Answers</h2>
-        <p style="color: var(--color-text-muted); margin-bottom: 1.5rem;">Please review your answers before receiving your clinical navigation recommendation:</p>
+        <div class="patient-progress">${[t(this.locale, 'progressSafety'), t(this.locale, 'progressDetails'), t(this.locale, 'progressReview'), t(this.locale, 'progressPlan')].map((phase, index) => `<div class="patient-progress-step ${index < 2 ? 'complete' : index === 2 ? 'current' : ''}"><span></span><small>${phase}</small></div>`).join('')}</div>
+        <h2 style="font-family: var(--font-heading); font-size: 1.75rem; margin-bottom: 0.5rem;">${t(this.locale, 'reviewTitle')}</h2>
+        <p style="color: var(--color-text-muted); margin-bottom: 1.5rem;">${t(this.locale, 'reviewLead')}</p>
 
         <div class="card">
           <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
             ${questions.map(q => {
               const val = answers[q.id];
-              let displayVal = 'Not Answered';
+              let displayVal = this.locale === 'fr' ? 'Sans réponse' : 'Not Answered';
               if (val === true) displayVal = 'Yes';
               else if (val === false) displayVal = 'No';
               else if (val !== undefined && val !== null) displayVal = String(val);
 
               return `
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border); padding-bottom: 0.75rem;">
-                  <div style="font-size: 0.95rem; font-weight: 500; padding-right: 1rem;">${q.label}</div>
+                  <div style="font-size: 0.95rem; font-weight: 500; padding-right: 1rem;">${questionLabel(this.locale, q)}</div>
                   <span class="badge ${val === true && q.isEmergencyRedFlag ? 'badge-danger' : 'badge-info'}">
-                    ${displayVal}
+                    ${displayVal === 'Yes' ? t(this.locale, 'yes') : displayVal === 'No' ? t(this.locale, 'no') : escapeHtml(displayVal)}
                   </span>
                 </div>
               `;
@@ -628,10 +757,10 @@ export class AppController {
 
           <div style="display: flex; gap: 1rem;">
             <button class="btn btn-secondary" onclick="window.app.reviseAnswers()">
-              ✏️ Edit Answers
+              ✏️ ${t(this.locale, 'edit')}
             </button>
             <button class="btn btn-primary btn-lg btn-full" onclick="window.app.evaluateSessionAndShowResults()">
-              Get Navigation Result &rarr;
+              ${t(this.locale, 'getResult')} →
             </button>
           </div>
         </div>
@@ -640,7 +769,7 @@ export class AppController {
   }
 
   renderDispositionResult() {
-    const nav = this.currentNavigation;
+    const nav = localizeNavigation(this.locale, this.currentNavigation, this.currentRuleResult?.disposition);
     const rule = this.currentRuleResult;
     const meta = DISPOSITION_METADATA[rule.disposition];
 
@@ -652,7 +781,7 @@ export class AppController {
             <div>
               <span class="badge ${meta.badgeClass}">${nav.headline}</span>
               <h1 style="font-family: var(--font-heading); font-size: 1.8rem; margin-top: 0.25rem;">
-                ${meta.destinationType}
+                ${localizedDestination(this.locale, rule.disposition, meta.destinationType)}
               </h1>
             </div>
           </div>
@@ -661,39 +790,36 @@ export class AppController {
           </p>
 
           <div style="background-color: rgba(255,255,255,0.7); padding: 1.25rem; border-radius: var(--radius-md); color: var(--color-text-primary); margin-bottom: 1.5rem;">
-            <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.5rem; text-transform: uppercase;">What To Do Next:</h4>
+            <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.5rem; text-transform: uppercase;">${t(this.locale, 'next')}:</h4>
             <ul style="padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem;">
               ${nav.nextStepActions.map(act => `<li>${act}</li>`).join('')}
             </ul>
           </div>
+          <button class="read-aloud-button ${meta.isEmergency ? 'light' : ''}" onclick="window.app.speakText('${escapeForJs(`${nav.headline}. ${nav.summaryText}. ${nav.nextStepActions.join('. ')}`)}')">🔊 ${t(this.locale, 'readPlan')}</button>
         </div>
 
         ${this.renderCareOptions()}
 
         <div class="card">
-          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">Why this recommendation?</h3>
-          <div style="font-size: 0.95rem; color: var(--color-text-secondary); margin-bottom: 1rem;">
-            Rule Trigger: <strong>${rule.ruleName}</strong> (Rule ID: <code>${rule.ruleId}</code> v${rule.ruleVersion})
-          </div>
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">${t(this.locale, 'why')}</h3>
           ${nav.triggeringFactsFormatted.length > 0 ? `
             <div style="background-color: var(--color-bg); padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1.5rem;">
-              <div style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.5rem;">KEY FACTORS IDENTIFIED:</div>
+              <div style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.5rem;">${t(this.locale, 'factors')}:</div>
               <ul style="padding-left: 1.25rem; font-size: 0.9rem; color: var(--color-text-primary);">
                 ${nav.triggeringFactsFormatted.map(f => `<li>${f}</li>`).join('')}
               </ul>
             </div>
           ` : ''}
 
-          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">Safety-Net Instructions (When to Escalate)</h3>
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">${t(this.locale, 'safetyNet')}</h3>
           <ul style="padding-left: 1.25rem; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem;">
             ${nav.safetyNetInstructions.map(instr => `<li>${instr}</li>`).join('')}
           </ul>
 
           <div style="background-color: var(--color-info-bg); border-left: 4px solid var(--color-info); padding: 0.75rem 1rem; border-radius: 4px; font-size: 0.85rem; color: #0C4A6E;">
-            ℹ️ ${nav.conceptualHandoffWarning}
+            ℹ️ ${t(this.locale, 'conceptual')}
           </div>
         </div>
-        ${this.renderAgentCollaboration()}
         ${this.renderFeedbackForm(false)}
       </div>
     `;
@@ -704,42 +830,30 @@ export class AppController {
     if (disposition === Disposition.CALL_911_NOW) return '';
 
     const scenario = this.currentSession?.scenario;
-    const options = [];
-    if (disposition === Disposition.GO_TO_ED_NOW) {
-      options.push(['Emergency Department', 'Go now. Do not delay to verify wait times.']);
-      options.push(['HealthLink BC 8-1-1', 'Call only if it does not delay emergency care.']);
-    } else if (disposition === Disposition.SAME_DAY_CLINICAL_ASSESSMENT) {
-      options.push(['Urgent and Primary Care Centre', 'Same-day wound or symptom assessment.']);
-      options.push(['Primary care or walk-in clinic', 'Call ahead to confirm same-day capacity.']);
-      options.push(['HealthLink BC 8-1-1', 'A registered nurse can help identify an appropriate service.']);
-    } else if (disposition === Disposition.CONTACT_811_OR_PRIMARY_CARE) {
-      options.push(['HealthLink BC 8-1-1', 'Free registered-nurse advice in British Columbia.']);
-      options.push(['Primary care or community clinic', 'Arrange non-emergency assessment.']);
-      if (scenario === Scenario.NAIL_PUNCTURE) options.push(['Pharmacy or public-health service', 'Call first to confirm vaccination services.']);
-    } else {
-      options.push(['Home monitoring', 'Follow the safety-net instructions shown above.']);
-      options.push(['HealthLink BC 8-1-1', 'Call if you remain concerned or symptoms change.']);
-    }
-
-    const nailSummary = scenario === Scenario.NAIL_PUNCTURE ? `
-      <div class="nail-summary-grid">
-        <div><span>Wound assessment</span><strong>${disposition === Disposition.SAME_DAY_CLINICAL_ASSESSMENT ? 'Same-day assessment recommended' : 'Follow the care level shown above'}</strong></div>
-        <div><span>Tetanus assessment</span><strong>${['over_5_years', 'unknown', 'never'].includes(this.currentHandoff?.answers?.tetanusStatus) ? 'A tetanus-containing vaccine may be recommended' : 'Recent vaccination reported'}</strong></div>
-        <div><span>Tetanus immune globulin</span><strong>Healthcare professional to confirm</strong></div>
-      </div>
-    ` : '';
+    const answers = this.currentHandoff?.answers || {};
+    const inPerson = requiresInPersonAssessment(scenario, disposition, answers);
+    const options = this.accessOptionsVisible ? getCareOptions({ community: this.accessCommunity, disposition, scenario, answers }) : [];
 
     return `
       <div class="card care-options-card">
         <div class="section-heading-row">
-          <div><div class="eyebrow">AGENT 2 — PRACTICAL NAVIGATION</div><h3>Care options for this demonstration</h3></div>
-          <span class="badge badge-info">SYNTHETIC</span>
+          <div><div class="eyebrow">${t(this.locale, 'demoOnly')}</div><h3>${t(this.locale, 'findCare')}</h3></div>
+          <span class="badge badge-info">${t(this.locale, 'demoOnly')}</span>
         </div>
-        ${nailSummary}
-        <div class="care-option-grid">
-          ${options.map(([title, detail]) => `<div class="care-option"><strong>${title}</strong><span>${detail}</span></div>`).join('')}
-        </div>
-        <p class="demo-caveat">Service availability, opening hours and wait times have not been verified. Conceptual handoff only—no information has been transmitted.</p>
+        ${inPerson ? `<div class="in-person-notice"><strong>🏥 ${t(this.locale, 'inPersonNeeded')}</strong><span>${t(this.locale, 'virtualNotSuitable')}</span></div>` : ''}
+        ${disposition === Disposition.GO_TO_ED_NOW ? `<p class="emergency-routing-note">${this.locale === 'fr' ? 'Seuls les services d’urgence sont affichés. Le 8-1-1 et les soins virtuels ne sont pas présentés comme solutions de remplacement.' : 'Only emergency departments are shown. 8-1-1 and virtual care are not presented as alternatives.'}</p>` : ''}
+        <form class="access-form" onsubmit="event.preventDefault(); window.app.showAccessOptions(this.community.value, this.barrier.value);">
+          <label><span>${t(this.locale, 'location')}</span><select name="community" class="form-select">${Object.entries(DEMO_COMMUNITIES).map(([key, value]) => `<option value="${key}" ${this.accessCommunity === key ? 'selected' : ''}>${value.label} · ${value.region}</option>`).join('')}</select></label>
+          <label><span>${t(this.locale, 'accessBarrier')}</span><select name="barrier" class="form-select"><option value="">${this.locale === 'fr' ? 'Aucun' : 'None'}</option><option value="transportation" ${this.accessBarrier === 'transportation' ? 'selected' : ''}>${this.locale === 'fr' ? 'Transport' : 'Transportation'}</option><option value="distance" ${this.accessBarrier === 'distance' ? 'selected' : ''}>${this.locale === 'fr' ? 'Distance' : 'Distance'}</option><option value="mobility" ${this.accessBarrier === 'mobility' ? 'selected' : ''}>${this.locale === 'fr' ? 'Mobilité' : 'Mobility or disability'}</option></select></label>
+          <button class="btn btn-primary" type="submit">${t(this.locale, 'viewOptions')}</button>
+        </form>
+        ${this.accessOptionsVisible ? `
+          <div class="matched-care-list">
+            ${options.length ? options.map(option => `<div class="matched-care-card ${option.recommended ? 'recommended' : ''}"><div class="matched-care-heading"><div><strong>${escapeHtml(option.name)}</strong><span>${escapeHtml(option.type)}</span></div>${option.recommended ? `<span class="recommended-badge">✓ ${t(this.locale, 'recommendedMatch')}</span>` : ''}</div><div class="matched-care-meta"><span>📍 ${escapeHtml(option.address)}</span><span>↔ ${escapeHtml(option.distance)}</span></div></div>`).join('') : `<p>${this.locale === 'fr' ? 'Aucune option fictive ne correspond à ce choix.' : 'No synthetic option matches this selection.'}</p>`}
+          </div>
+          <p class="demo-caveat">${t(this.locale, 'notLive')}</p>
+          <a class="official-directory-link" href="https://www.healthlinkbc.ca/health-services/search" target="_blank" rel="noopener noreferrer">${t(this.locale, 'officialDirectory')} ↗</a>
+        ` : `<p class="demo-caveat">${t(this.locale, 'locationLead')}</p>`}
       </div>
     `;
   }
@@ -765,11 +879,12 @@ export class AppController {
   }
 
   renderFeedbackForm(compact = false) {
+    const fr = this.locale === 'fr';
     return `
       <div class="card feedback-card">
-        <div class="eyebrow">AGENT 3 — FEEDBACK & LEARNING</div>
-        <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.35rem;">Was this guidance understandable and realistic?</h3>
-        <p style="color: var(--color-text-muted); margin-bottom: 1rem;">Your feedback becomes a synthetic review item; it never changes a clinical rule automatically.</p>
+        <div class="eyebrow">${fr ? 'VOTRE EXPÉRIENCE' : 'YOUR EXPERIENCE'}</div>
+        <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.35rem;">${t(this.locale, 'feedbackTitle')}</h3>
+        <p style="color: var(--color-text-muted); margin-bottom: 1rem;">${t(this.locale, 'feedbackLead')}</p>
         <form onsubmit="event.preventDefault(); window.app.submitPatientFeedback({
           helpful: this.helpful.value === 'yes',
           clarityScore: this.clarityScore.value,
@@ -784,19 +899,19 @@ export class AppController {
           comments: this.comments.value
         });">
           <div class="feedback-grid">
-            <label class="form-group"><span class="form-label">Helpful?</span><select name="helpful" class="form-select"><option value="yes">👍 Yes</option><option value="no">👎 No</option></select></label>
-            <label class="form-group"><span class="form-label">Clarity (1–5)</span><select name="clarityScore" class="form-select">${ratingOptions()}</select></label>
-            <label class="form-group"><span class="form-label">Trust (1–5)</span><select name="trustScore" class="form-select">${ratingOptions()}</select></label>
-            <label class="form-group"><span class="form-label">Confidence (1–5)</span><select name="confidenceScore" class="form-select">${ratingOptions()}</select></label>
-            <label class="form-group"><span class="form-label">Next step clear?</span><select name="isNextStepClear" class="form-select"><option value="yes">Yes</option><option value="no">No</option></select></label>
-            <label class="form-group"><span class="form-label">Know when to escalate?</span><select name="knowsEscalation" class="form-select"><option value="yes">Yes</option><option value="no">No</option></select></label>
-            <label class="form-group"><span class="form-label">Can you follow this plan?</span><select name="canFollow" class="form-select"><option value="yes">Yes</option><option value="maybe">Maybe</option><option value="no">No</option></select></label>
-            <label class="form-group"><span class="form-label">Main access barrier</span><select name="accessBarrier" class="form-select"><option value="">None</option><option value="transportation">Transportation</option><option value="childcare">Childcare</option><option value="distance">Distance</option><option value="cost">Cost</option><option value="language">Language</option><option value="mobility">Mobility or disability</option><option value="trust">Cultural safety or trust</option></select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Utile?' : 'Helpful?'}</span><select name="helpful" class="form-select"><option value="yes">👍 ${t(this.locale, 'yes')}</option><option value="no">👎 ${t(this.locale, 'no')}</option></select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Clarté' : 'Clarity'} (1–5)</span><select name="clarityScore" class="form-select">${ratingOptions()}</select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Confiance' : 'Trust'} (1–5)</span><select name="trustScore" class="form-select">${ratingOptions()}</select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Assurance' : 'Confidence'} (1–5)</span><select name="confidenceScore" class="form-select">${ratingOptions()}</select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Prochaine étape claire?' : 'Next step clear?'}</span><select name="isNextStepClear" class="form-select"><option value="yes">${t(this.locale, 'yes')}</option><option value="no">${t(this.locale, 'no')}</option></select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Savez-vous quand obtenir plus d’aide?' : 'Know when to escalate?'}</span><select name="knowsEscalation" class="form-select"><option value="yes">${t(this.locale, 'yes')}</option><option value="no">${t(this.locale, 'no')}</option></select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Pouvez-vous suivre ce plan?' : 'Can you follow this plan?'}</span><select name="canFollow" class="form-select"><option value="yes">${t(this.locale, 'yes')}</option><option value="maybe">${fr ? 'Peut-être' : 'Maybe'}</option><option value="no">${t(this.locale, 'no')}</option></select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Principal obstacle' : 'Main access barrier'}</span><select name="accessBarrier" class="form-select"><option value="">${fr ? 'Aucun' : 'None'}</option><option value="transportation">${fr ? 'Transport' : 'Transportation'}</option><option value="childcare">${fr ? 'Garde d’enfants' : 'Childcare'}</option><option value="distance">Distance</option><option value="cost">${fr ? 'Coût' : 'Cost'}</option><option value="language">${fr ? 'Langue' : 'Language'}</option><option value="mobility">${fr ? 'Mobilité ou handicap' : 'Mobility or disability'}</option><option value="trust">${fr ? 'Sécurité culturelle ou confiance' : 'Cultural safety or trust'}</option></select></label>
           </div>
-          <label class="safety-checkbox"><input type="checkbox" name="unsafeConcern" /> I believe something about this guidance could be unsafe.</label>
-          ${compact ? '<input type="hidden" name="confusingItems" value="" />' : '<label class="form-group"><span class="form-label">Was anything confusing or missing?</span><input type="text" name="confusingItems" class="form-control" placeholder="Optional" /></label>'}
-          <label class="form-group"><span class="form-label">Additional comment</span><textarea name="comments" class="form-textarea" rows="2" placeholder="Optional feedback"></textarea></label>
-          <button type="submit" class="btn btn-primary btn-lg btn-full">Submit Feedback & Update Dashboard &rarr;</button>
+          <label class="safety-checkbox"><input type="checkbox" name="unsafeConcern" /> ${fr ? 'Je crois qu’un élément de ces conseils pourrait être dangereux.' : 'I believe something about this guidance could be unsafe.'}</label>
+          ${compact ? '<input type="hidden" name="confusingItems" value="" />' : `<label class="form-group"><span class="form-label">${fr ? 'Quelque chose était-il déroutant ou manquant?' : 'Was anything confusing or missing?'}</span><input type="text" name="confusingItems" class="form-control" placeholder="${fr ? 'Facultatif' : 'Optional'}" /></label>`}
+          <label class="form-group"><span class="form-label">${fr ? 'Commentaire supplémentaire' : 'Additional comment'}</span><textarea name="comments" class="form-textarea" rows="2" placeholder="${fr ? 'Commentaire facultatif' : 'Optional feedback'}"></textarea></label>
+          <button type="submit" class="btn btn-primary btn-lg btn-full">${fr ? 'Envoyer mes commentaires' : 'Submit feedback'} →</button>
         </form>
       </div>
     `;
@@ -1035,8 +1150,8 @@ export class AppController {
                     </td>
                     <td>${escapeHtml(imp.reviewer)}</td>
                     <td>
-                      <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="alert('This synthetic proposal remains subject to human clinical review, testing and approval.')">
-                        Audit
+                      <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="window.app.auditFilter='${escapeForJs(imp.sourceSessionId)}'; window.app.setTab('audit');">
+                        View governance history
                       </button>
                     </td>
                   </tr>
@@ -1044,6 +1159,23 @@ export class AppController {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderAuditLog() {
+    const logs = AuditLogger.getLogs();
+    const needle = this.auditFilter.toLowerCase();
+    const filtered = logs.filter(log => !needle || log.sessionId.toLowerCase().includes(needle) || log.eventType.toLowerCase().includes(needle) || log.actor.toLowerCase().includes(needle));
+    const selected = logs.find(log => log.eventId === this.selectedAuditEventId) || filtered[0] || null;
+    return `
+      <div class="audit-page">
+        <div class="presenter-hero"><div><div class="eyebrow">SYNTHETIC BROWSER-LOCAL LOG</div><h1>Audit and decision provenance</h1><p>Chronological evidence of questions, rule evaluations, recommendations, feedback and governance actions. This is not a production server log.</p></div><span class="badge badge-info">${logs.length} events</span></div>
+        <div class="audit-filter"><label for="audit-search">Filter by session, event or actor</label><input id="audit-search" class="form-control" value="${escapeHtml(this.auditFilter)}" placeholder="e.g. syn-session-102 or RULE_EVALUATED" oninput="window.app.auditFilter=this.value" onchange="window.app.setAuditFilter(this.value)" /><button class="btn btn-secondary" onclick="window.app.setAuditFilter(document.getElementById('audit-search').value)">Apply</button></div>
+        <div class="audit-layout">
+          <div class="audit-events table-container"><table class="data-table"><thead><tr><th>Time</th><th>Event</th><th>Session</th><th>Actor</th><th></th></tr></thead><tbody>${filtered.map(log => `<tr><td>${new Date(log.timestamp).toLocaleTimeString()}</td><td><span class="audit-event-type">${escapeHtml(log.eventType)}</span></td><td><code>${escapeHtml(log.sessionId)}</code></td><td>${escapeHtml(log.actor)}</td><td><button class="btn btn-secondary audit-inspect" onclick="window.app.inspectAuditEvent('${log.eventId}')">Inspect</button></td></tr>`).join('') || '<tr><td colspan="5">No matching events.</td></tr>'}</tbody></table></div>
+          <aside class="audit-payload"><div class="eyebrow">EVENT PAYLOAD</div>${selected ? `<h3>${escapeHtml(selected.eventType)}</h3><p><code>${escapeHtml(selected.eventId)}</code></p><dl><dt>Session</dt><dd>${escapeHtml(selected.sessionId)}</dd><dt>Actor</dt><dd>${escapeHtml(selected.actor)}</dd><dt>Timestamp</dt><dd>${escapeHtml(selected.timestamp)}</dd></dl><pre>${escapeHtml(JSON.stringify(selected.payload, null, 2))}</pre>` : '<p>Select an event to inspect its synthetic payload.</p>'}</aside>
         </div>
       </div>
     `;
@@ -1222,6 +1354,62 @@ function ratingOptions() {
   return [5, 4, 3, 2, 1]
     .map(value => `<option value="${value}" ${value === 5 ? 'selected' : ''}>${value}</option>`)
     .join('');
+}
+
+function localizeNavigation(locale, navigation, disposition) {
+  if (!navigation || locale !== 'fr') return navigation;
+  const content = {
+    [Disposition.CALL_911_NOW]: {
+      headline: 'Composez le 911 immédiatement',
+      summaryText: 'Les renseignements fournis comprennent un signe d’urgence grave qui nécessite une aide immédiate.',
+      nextStepActions: ['Composez le 911 maintenant ou demandez à quelqu’un de le faire.', 'Asseyez-vous ou allongez-vous dans un endroit sûr.', 'Ne conduisez pas vous-même.'],
+      safetyNetInstructions: ['N’attendez pas que les symptômes disparaissent.', 'Si la situation change pendant l’attente, informez immédiatement le répartiteur du 911.']
+    },
+    [Disposition.GO_TO_ED_NOW]: {
+      headline: 'Allez à l’urgence maintenant',
+      summaryText: 'Les renseignements fournis indiquent qu’une évaluation immédiate à l’urgence est nécessaire.',
+      nextStepActions: ['Allez directement à l’urgence la plus proche.', 'Demandez à un proche ou à un taxi de vous conduire.', 'Ne conduisez pas si vous vous sentez très malade, étourdi ou confus.'],
+      safetyNetInstructions: ['Composez le 911 si votre état s’aggrave ou si vous ne pouvez pas vous rendre à l’urgence en toute sécurité.']
+    },
+    [Disposition.SAME_DAY_CLINICAL_ASSESSMENT]: {
+      headline: 'Obtenez une évaluation aujourd’hui',
+      summaryText: 'Votre préoccupation devrait être évaluée en personne aujourd’hui dans un service de soins urgents ou une clinique appropriée.',
+      nextStepActions: ['Communiquez avec un centre de soins urgents ou votre clinique pour une visite le jour même.', 'Apportez votre liste de médicaments et vos renseignements de vaccination si vous les avez.', 'Surveillez les signes d’aggravation pendant l’attente.'],
+      safetyNetInstructions: ['Obtenez une aide d’urgence si les symptômes s’aggravent rapidement ou si un nouveau signe grave apparaît.']
+    },
+    [Disposition.CONTACT_811_OR_PRIMARY_CARE]: {
+      headline: 'Communiquez avec les soins primaires ou le 8-1-1',
+      summaryText: 'Aucun signe d’urgence n’a été identifié, mais des conseils ou une évaluation non urgente sont recommandés.',
+      nextStepActions: ['Communiquez avec votre médecin ou votre infirmière praticienne.', 'Vous pouvez aussi composer le 8-1-1 pour obtenir des conseils infirmiers en Colombie-Britannique.', 'Surveillez tout changement de vos symptômes.'],
+      safetyNetInstructions: ['Obtenez une aide plus urgente si vos symptômes s’aggravent ou si un nouveau signe inquiétant apparaît.']
+    },
+    [Disposition.HOME_MONITOR_WITH_SAFETY_NET]: {
+      headline: 'Surveillez vos symptômes à la maison',
+      summaryText: 'Le dépistage n’a pas identifié de signe d’urgence. Vous pouvez surveiller vos symptômes à la maison en suivant les consignes ci-dessous.',
+      nextStepActions: ['Reposez-vous et buvez suffisamment de liquides.', 'Surveillez attentivement vos symptômes.', 'Suivez les consignes ci-dessous si votre état change.'],
+      safetyNetInstructions: ['Obtenez une aide urgente si vous avez beaucoup de difficulté à respirer, devenez confus, vous évanouissez ou ne pouvez plus boire.']
+    }
+  }[disposition];
+  return content ? { ...navigation, ...content } : navigation;
+}
+
+function localizedDestination(locale, disposition, fallback) {
+  if (locale !== 'fr') return fallback;
+  return {
+    [Disposition.CALL_911_NOW]: 'Services d’urgence (911)',
+    [Disposition.GO_TO_ED_NOW]: 'Service d’urgence',
+    [Disposition.SAME_DAY_CLINICAL_ASSESSMENT]: 'Soins urgents ou clinique le jour même',
+    [Disposition.CONTACT_811_OR_PRIMARY_CARE]: 'Soins primaires ou HealthLink BC 8-1-1',
+    [Disposition.HOME_MONITOR_WITH_SAFETY_NET]: 'Autosoins à la maison'
+  }[disposition] || fallback;
+}
+
+function escapeForJs(value) {
+  return String(value ?? '')
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'")
+    .replaceAll('\n', ' ')
+    .replaceAll('\r', ' ');
 }
 
 function escapeHtml(value) {
