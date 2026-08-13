@@ -118,6 +118,45 @@ test('access matching preserves urgency and excludes unsafe substitutes', () => 
   assert.ok(punctureOptions.every(option => option.type !== 'Virtual Primary Care'));
 });
 
+test('First Nations services require explicit opt-in and cannot override urgent routes', () => {
+  const withoutOptIn = getCareOptions({
+    community: 'smithers',
+    disposition: Disposition.HOME_MONITOR_WITH_SAFETY_NET,
+    scenario: Scenario.FEVER,
+    firstNationsServicesRequested: false
+  });
+  assert.ok(withoutOptIn.every(option => option.id !== 'fnha-virtual-doctor'));
+
+  const withOptIn = getCareOptions({
+    community: 'smithers',
+    disposition: Disposition.HOME_MONITOR_WITH_SAFETY_NET,
+    scenario: Scenario.FEVER,
+    firstNationsServicesRequested: true
+  });
+  const fnha = withOptIn.find(option => option.id === 'fnha-virtual-doctor');
+  assert.ok(fnha);
+  assert.equal(fnha.recommended, false);
+  assert.equal(fnha.additionalSupport, true);
+
+  const emergency = getCareOptions({
+    community: 'victoria',
+    disposition: Disposition.GO_TO_ED_NOW,
+    scenario: Scenario.FEVER,
+    firstNationsServicesRequested: true
+  });
+  assert.ok(emergency.every(option => option.type === 'Emergency Department'));
+  assert.ok(emergency.every(option => option.id !== 'fnha-virtual-doctor'));
+
+  const handsOnWound = getCareOptions({
+    community: 'victoria',
+    disposition: Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
+    scenario: Scenario.NAIL_PUNCTURE,
+    answers: { deepPenetration: true },
+    firstNationsServicesRequested: true
+  });
+  assert.ok(handsOnWound.every(option => option.id !== 'fnha-virtual-doctor'));
+});
+
 test('patient interface supports French labels without changing canonical facts', () => {
   assert.equal(t('fr', 'patientPortal'), 'Vue patient');
   assert.match(questionLabel('fr', { id: 'severeBreathingDifficulty', label: 'Fallback' }), /respirer/);
@@ -146,12 +185,25 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   const app = new AppController(root);
   globalThis.window.app = app;
 
+  app.startNewPatientSession();
+  app.acceptConsent(false);
+  assert.equal(app.patientStep, 'unsupported_age');
+  assert.match(root.innerHTML, /not configured for children or youth/);
+  app.startNewPatientSession();
+  app.acceptConsent(true);
+  assert.equal(app.patientStep, 'concern_input');
+
+  app.launchDemoCase('DEMO_D');
+  assert.match(root.innerHTML, /does not calculate CTAS, qSOFA or SIRS/);
+
   app.launchDemoCase('DEMO_A');
   assert.equal(app.patientStep, 'disposition');
   assert.equal(app.activeTab, 'presenter');
   assert.match(root.innerHTML, /INTERACTIVE DECISION WALKTHROUGH/);
   assert.match(root.innerHTML, /Patient’s synthetic opening statement/);
   assert.match(root.innerHTML, /NAIL-U01/);
+  assert.match(root.innerHTML, /CLINICAL TRIAGE GOVERNANCE/);
+  assert.match(root.innerHTML, /do not represent a diagnosis or validated clinical triage assessment/);
 
   app.toggleCollaborationStep('rules');
   assert.match(root.innerHTML, /DETERMINISTIC FIRST-MATCH LOGIC/);
@@ -168,8 +220,9 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   app.setTab('patient');
   assert.doesNotMatch(root.innerHTML, /INTERACTIVE DECISION WALKTHROUGH/);
   assert.doesNotMatch(root.innerHTML, /Inspect structured handoff JSON/);
+  assert.doesNotMatch(root.innerHTML, /CLINICAL TRIAGE GOVERNANCE/);
   assert.match(root.innerHTML, /Find an appropriate care option/);
-  assert.match(root.innerHTML, /Tetanus vaccination status/);
+  assert.match(root.innerHTML, /An in-person assessment is recommended/);
 
   app.submitPatientFeedback({
     helpful: true,
@@ -180,6 +233,7 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
     knowsEscalation: true,
     canFollow: 'yes',
     accessBarrier: '',
+    culturallyRespectful: 'yes',
     unsafeConcern: false,
     comments: 'Clear next step.',
     confusingItems: ''
@@ -188,6 +242,7 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
 
   const saved = SyntheticStore.getEncounters().find(e => e.sessionId === app.currentSession.sessionId);
   assert.equal(saved.patientFeedback.trustScore, 4);
+  assert.equal(saved.patientFeedback.culturallyRespectful, 'yes');
   assert.equal(saved.feedbackAnalysis.feedbackStream, 'PATIENT_EXPERIENCE');
 
   app.submitStaffReview(saved.sessionId, {
@@ -208,6 +263,15 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   assert.match(root.innerHTML, /Learning System Dashboard/);
   app.setTab('architecture');
   assert.match(root.innerHTML, /One front door, several safe care destinations/);
+
+  app.launchDemoCase('DEMO_C');
+  app.setTab('patient');
+  app.showAccessOptions('smithers', 'distance', true);
+  assert.match(root.innerHTML, /First Nations Virtual Doctor of the Day/);
+  assert.match(root.innerHTML, /Additional culturally safe option/);
+  const accessEncounter = SyntheticStore.getEncounters().find(e => e.sessionId === app.currentSession.sessionId);
+  assert.equal(accessEncounter.accessContext.firstNationsServicesRequested, true);
+  assert.equal(accessEncounter.accessContext.community, 'smithers');
 
   app.launchDemoCase('DEMO_B');
   assert.equal(app.patientStep, 'emergency_stop');
