@@ -20,7 +20,7 @@ export class AppController {
     
     // Application State
     this.activeTab = 'patient'; // 'patient' | 'presenter' | 'staff' | 'improvements' | 'audit' | 'architecture'
-    this.patientStep = 'landing'; // 'landing' | 'consent' | 'concern_input' | 'intake' | 'emergency_stop' | 'review' | 'disposition' | 'complete'
+    this.patientStep = 'landing'; // 'landing' | 'consent' | 'unsupported_age' | 'concern_input' | 'intake' | 'emergency_stop' | 'review' | 'disposition' | 'complete'
     this.narrativeError = '';
     this.locale = localStorage.getItem('ed_compass_locale') || 'en';
     this.plainLanguage = localStorage.getItem('ed_compass_plain_language') === 'true';
@@ -28,6 +28,7 @@ export class AppController {
     this.recognition = null;
     this.accessCommunity = 'victoria';
     this.accessBarrier = '';
+    this.firstNationsServicesRequested = false;
     this.accessOptionsVisible = false;
     this.auditFilter = '';
     this.selectedAuditEventId = null;
@@ -134,15 +135,31 @@ export class AppController {
     window.speechSynthesis.speak(utterance);
   }
 
-  showAccessOptions(community, barrier) {
+  showAccessOptions(community, barrier, firstNationsServicesRequested = false) {
     this.accessCommunity = DEMO_COMMUNITIES[community] ? community : 'victoria';
     this.accessBarrier = barrier || '';
+    this.firstNationsServicesRequested = Boolean(firstNationsServicesRequested);
     this.accessOptionsVisible = true;
     AuditLogger.logEvent(AuditEventType.ACCESS_OPTIONS_DISPLAYED, this.currentSession?.sessionId || 'ACCESS', {
       community: this.accessCommunity,
       barrier: this.accessBarrier,
+      firstNationsServicesRequested: this.firstNationsServicesRequested,
       disposition: this.currentRuleResult?.disposition
     }, 'Patient');
+    if (this.firstNationsServicesRequested) {
+      AuditLogger.logEvent(AuditEventType.FIRST_NATIONS_OPTIONS_SELECTED, this.currentSession?.sessionId || 'ACCESS', {
+        explicitOptIn: true,
+        community: this.accessCommunity,
+        disposition: this.currentRuleResult?.disposition
+      }, 'Patient');
+    }
+    this.persistCurrentEncounter({
+      accessContext: {
+        community: this.accessCommunity,
+        barrier: this.accessBarrier,
+        firstNationsServicesRequested: this.firstNationsServicesRequested
+      }
+    });
     this.render();
   }
 
@@ -154,12 +171,23 @@ export class AppController {
     this.currentFeedbackAnalysis = null;
     this.currentDemoId = null;
     this.accessOptionsVisible = false;
+    this.firstNationsServicesRequested = false;
     this.voiceStatus = '';
     this.patientStep = 'consent';
     this.render();
   }
 
-  acceptConsent() {
+  acceptConsent(isAdult) {
+    const adultEligible = isAdult === true;
+    AuditLogger.logEvent(AuditEventType.SCOPE_ELIGIBILITY_CHECKED, 'NEW_SESSION', {
+      adultScope: adultEligible,
+      minimumAge: 18
+    });
+    if (!adultEligible) {
+      this.patientStep = 'unsupported_age';
+      this.render();
+      return;
+    }
     AuditLogger.logEvent(AuditEventType.CONSENT_GIVEN, 'NEW_SESSION', { consent: true });
     this.patientStep = 'concern_input';
     this.render();
@@ -493,6 +521,7 @@ export class AppController {
           <div><span>Agent handoff</span><strong>${Object.keys(this.currentHandoff?.answers || {}).length} structured facts</strong></div>
         </div>
         ${this.renderAgentCollaboration()}
+        ${this.renderTriageFrameworksBox()}
         <details class="technical-details"><summary>Inspect structured handoff JSON</summary><pre>${escapeHtml(JSON.stringify(this.currentHandoff, null, 2))}</pre></details>
       </div>
     ` : '';
@@ -517,6 +546,7 @@ export class AppController {
           <div class="patient-landing">
             <div class="patient-hero-copy">
               <div class="eyebrow">${t(this.locale, 'noWrongDoor')}</div>
+              <div class="adult-scope-badge">${t(this.locale, 'adultScopeBadge')}</div>
               <h1>${t(this.locale, 'landingTitle')}</h1>
               <p>${t(this.locale, 'landingLead')}</p>
               <button class="btn btn-primary btn-lg" onclick="window.app.startNewPatientSession()">${t(this.locale, 'start')} →</button>
@@ -543,11 +573,26 @@ export class AppController {
                 <p><strong>${t(this.locale, 'emergencyNotice')}</strong></p>
               </div>
 
-              <div style="display: flex; gap: 1rem;">
-                <button class="btn btn-primary btn-lg btn-full" onclick="window.app.acceptConsent()">
-                  ${t(this.locale, 'agree')}
-                </button>
+              <div class="adult-scope-question">
+                <h3>${t(this.locale, 'adultScopeTitle')}</h3>
+                <p>${t(this.locale, 'adultScopeLead')}</p>
+                <div class="scope-action-grid">
+                  <button class="btn btn-primary btn-lg" onclick="window.app.acceptConsent(true)">${t(this.locale, 'adultYes')}</button>
+                  <button class="btn btn-secondary btn-lg" onclick="window.app.acceptConsent(false)">${t(this.locale, 'adultNo')}</button>
+                </div>
               </div>
+            </div>
+          </div>
+        `;
+
+      case 'unsupported_age':
+        return `
+          <div class="container-narrow">
+            <div class="card unsupported-age-card">
+              <div class="unsupported-age-icon" aria-hidden="true">ℹ️</div>
+              <h2>${t(this.locale, 'unsupportedAgeTitle')}</h2>
+              <p>${t(this.locale, 'unsupportedAgeLead')}</p>
+              <button class="btn btn-primary btn-lg" onclick="window.app.patientStep='landing'; window.app.render();">${t(this.locale, 'returnStart')}</button>
             </div>
           </div>
         `;
@@ -732,7 +777,6 @@ export class AppController {
           </div>
         </div>
 
-        ${this.renderTriageFrameworksBox()}
         ${this.renderFeedbackForm(true)}
       </div>
     `;
@@ -823,7 +867,6 @@ export class AppController {
             ℹ️ ${t(this.locale, 'conceptual')}
           </div>
         </div>
-        ${this.renderTriageFrameworksBox()}
         ${this.renderFeedbackForm(false)}
       </div>
     `;
@@ -872,12 +915,14 @@ export class AppController {
       if (tools.length === 0) {
         tools.push('SNNOOP10 headache red flag screening');
       }
-    } else {
+    } else if (scenario === Scenario.FEVER) {
       if (answers.severeBreathingDifficulty === true) {
-        tools.push('CTAS, qSOFA, SIRS');
+        tools.push('CTAS-informed urgency concepts (not a CTAS score)');
+        tools.push('qSOFA/SIRS literature context (not calculated)');
       }
       if (answers.unresponsiveOrSeverelyConfused === true || answers.seizureOrSyncope === true) {
-        tools.push('CTAS, qSOFA');
+        tools.push('CTAS-informed urgency concepts (not a CTAS score)');
+        tools.push('qSOFA literature context (not calculated)');
       }
       if (
         answers.blueLipsOrFace === true ||
@@ -888,39 +933,30 @@ export class AppController {
         answers.significantImmunosuppression === true ||
         answers.immunocompromisedOrCancer === true
       ) {
-        tools.push('CTAS');
+        tools.push('CTAS-informed urgency concepts (not a CTAS score)');
       }
 
       const redFlagKeys = [
         'neckStiffnessOrSevereHeadache',
         'nonBlanchingPurpuricRash',
-        'thunderclapOnset',
-        'focalNeuroDeficit',
-        'feverWithStiffNeck',
-        'firstWorstHeadache',
-        'recentHeadTrauma',
-        'anticoagulantUse',
-        'painfulRedEyeWithVisionLoss',
-        'pregnancyOrPostpartum',
-        'newOrChangedHeadache',
-        'uncontrolledBleeding',
-        'numbnessOrCirculationIssue',
-        'objectEmbedded',
-        'deepPenetration',
-        'grossContamination',
-        'worseningPainOrSwelling',
         'unableToKeepFluidsDown',
         'pregnancy'
       ];
 
       const hasRedFlags = redFlagKeys.some(k => answers[k] === true) || answers.feverDuration3DaysPlus === true || (answers.durationDays || 0) >= 3;
       if (hasRedFlags || tools.length === 0) {
-        tools.push('evidence-based clinical red flags');
+        tools.push('Adult fever red-flag and high-risk-host screening');
       }
+    } else if (scenario === Scenario.NAIL_PUNCTURE) {
+      tools.push('BCCDC and Canadian tetanus wound-management guidance');
+      tools.push('Wound depth, contamination and immunization history; rust has zero independent decision weight');
     }
 
     const uniqueTools = [...new Set(tools)];
     const triggeringFacts = nav?.triggeringFactsFormatted || [];
+    const frameworkBoundary = scenario === Scenario.FEVER
+      ? 'Teaching references only. ED Compass does not calculate CTAS, qSOFA or SIRS and does not collect the clinical observations required to apply those tools.'
+      : 'Teaching references only. They support transparent discussion of the classroom rules and do not represent a diagnosis or validated clinical triage assessment.';
 
     return `
       <div class="card triage-frameworks-box" style="background: #F8FAFC; border: 1px solid #CBD5E1; border-left: 4px solid #0EA5E9; padding: 1.25rem; border-radius: var(--radius-lg); margin-bottom: 1.5rem;">
@@ -936,10 +972,11 @@ export class AppController {
           </div>
         ` : ''}
 
-        <h4 style="font-size: 1.05rem; font-weight: 700; color: #0F172A; margin-bottom: 0.75rem;">Frameworks informing triage logic:</h4>
+        <h4 style="font-size: 1.05rem; font-weight: 700; color: #0F172A; margin-bottom: 0.75rem;">Frameworks informing the classroom rule logic:</h4>
         <ul style="padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9rem; color: #334155; font-weight: 600;">
           ${uniqueTools.map(tool => `<li>${tool}</li>`).join('')}
         </ul>
+        <p class="framework-boundary-note">${frameworkBoundary}</p>
       </div>
     `;
   }
@@ -951,7 +988,13 @@ export class AppController {
     const scenario = this.currentSession?.scenario;
     const answers = this.currentHandoff?.answers || {};
     const inPerson = requiresInPersonAssessment(scenario, disposition, answers);
-    const options = this.accessOptionsVisible ? getCareOptions({ community: this.accessCommunity, disposition, scenario, answers }) : [];
+    const options = this.accessOptionsVisible ? getCareOptions({
+      community: this.accessCommunity,
+      disposition,
+      scenario,
+      answers,
+      firstNationsServicesRequested: this.firstNationsServicesRequested
+    }) : [];
 
     return `
       <div class="card care-options-card">
@@ -961,14 +1004,15 @@ export class AppController {
         </div>
         ${inPerson ? `<div class="in-person-notice"><strong>🏥 ${t(this.locale, 'inPersonNeeded')}</strong><span>${t(this.locale, 'virtualNotSuitable')}</span></div>` : ''}
         ${disposition === Disposition.GO_TO_ED_NOW ? `<p class="emergency-routing-note">${this.locale === 'fr' ? 'Seuls les services d’urgence sont affichés. Le 8-1-1 et les soins virtuels ne sont pas présentés comme solutions de remplacement.' : 'Only emergency departments are shown. 8-1-1 and virtual care are not presented as alternatives.'}</p>` : ''}
-        <form class="access-form" onsubmit="event.preventDefault(); window.app.showAccessOptions(this.community.value, this.barrier.value);">
+        <form class="access-form" onsubmit="event.preventDefault(); window.app.showAccessOptions(this.community.value, this.barrier.value, this.firstNations.value === 'yes');">
           <label><span>${t(this.locale, 'location')}</span><select name="community" class="form-select">${Object.entries(DEMO_COMMUNITIES).map(([key, value]) => `<option value="${key}" ${this.accessCommunity === key ? 'selected' : ''}>${value.label} · ${value.region}</option>`).join('')}</select></label>
           <label><span>${t(this.locale, 'accessBarrier')}</span><select name="barrier" class="form-select"><option value="">${this.locale === 'fr' ? 'Aucun' : 'None'}</option><option value="transportation" ${this.accessBarrier === 'transportation' ? 'selected' : ''}>${this.locale === 'fr' ? 'Transport' : 'Transportation'}</option><option value="distance" ${this.accessBarrier === 'distance' ? 'selected' : ''}>${this.locale === 'fr' ? 'Distance' : 'Distance'}</option><option value="mobility" ${this.accessBarrier === 'mobility' ? 'selected' : ''}>${this.locale === 'fr' ? 'Mobilité' : 'Mobility or disability'}</option></select></label>
+          ${inPerson ? '<input type="hidden" name="firstNations" value="no" />' : `<label class="fnha-opt-in"><span>${t(this.locale, 'firstNationsHeading')}</span><small>${t(this.locale, 'firstNationsQuestion')}</small><select name="firstNations" class="form-select"><option value="no" ${!this.firstNationsServicesRequested ? 'selected' : ''}>${t(this.locale, 'firstNationsNo')}</option><option value="yes" ${this.firstNationsServicesRequested ? 'selected' : ''}>${t(this.locale, 'firstNationsYes')}</option></select></label>`}
           <button class="btn btn-primary" type="submit">${t(this.locale, 'viewOptions')}</button>
         </form>
         ${this.accessOptionsVisible ? `
           <div class="matched-care-list">
-            ${options.length ? options.map(option => `<div class="matched-care-card ${option.recommended ? 'recommended' : ''}"><div class="matched-care-heading"><div><strong>${escapeHtml(option.name)}</strong><span>${escapeHtml(option.type)}</span></div>${option.recommended ? `<span class="recommended-badge">✓ ${t(this.locale, 'recommendedMatch')}</span>` : ''}</div><div class="matched-care-meta"><span>📍 ${escapeHtml(option.address)}</span><span>↔ ${escapeHtml(option.distance)}</span></div></div>`).join('') : `<p>${this.locale === 'fr' ? 'Aucune option fictive ne correspond à ce choix.' : 'No synthetic option matches this selection.'}</p>`}
+            ${options.length ? options.map(option => `<div class="matched-care-card ${option.recommended ? 'recommended' : ''} ${option.firstNationsSpecific ? 'fnha-option' : ''}"><div class="matched-care-heading"><div><strong>${escapeHtml(option.name)}</strong><span>${escapeHtml(option.provider || option.type)}</span></div>${option.recommended ? `<span class="recommended-badge">✓ ${t(this.locale, 'recommendedMatch')}</span>` : option.additionalSupport ? `<span class="additional-support-badge">${t(this.locale, 'additionalSupport')}</span>` : ''}</div><div class="matched-care-meta"><span>📍 ${escapeHtml(option.address)}</span><span>↔ ${escapeHtml(option.distance)}</span></div>${option.firstNationsSpecific ? `<div class="fnha-details"><p><strong>${this.locale === 'fr' ? 'Téléphone' : 'Phone'}:</strong> ${escapeHtml(option.phone)}</p><p><strong>${this.locale === 'fr' ? 'Admissibilité' : 'Eligibility'}:</strong> ${escapeHtml(option.eligibilityNotes)}</p><p><strong>${this.locale === 'fr' ? 'Heures indicatives' : 'Typical hours'}:</strong> ${escapeHtml(option.hours)}</p><p>${escapeHtml(option.suitabilityNotice)}</p><a href="${escapeHtml(option.officialUrl)}" target="_blank" rel="noopener noreferrer">FNHA ${this.locale === 'fr' ? '— détails officiels' : 'official service details'} ↗</a><small>${t(this.locale, 'confirmServiceDetails')}</small></div>` : ''}</div>`).join('') : `<p>${this.locale === 'fr' ? 'Aucune option fictive ne correspond à ce choix.' : 'No synthetic option matches this selection.'}</p>`}
           </div>
           <p class="demo-caveat">${t(this.locale, 'notLive')}</p>
           <a class="official-directory-link" href="https://www.healthlinkbc.ca/health-services/search" target="_blank" rel="noopener noreferrer">${t(this.locale, 'officialDirectory')} ↗</a>
@@ -1086,6 +1130,7 @@ export class AppController {
           knowsEscalation: this.knowsEscalation.value === 'yes',
           canFollow: this.canFollow.value,
           accessBarrier: this.accessBarrier.value,
+          culturallyRespectful: this.culturallyRespectful.value,
           unsafeConcern: this.unsafeConcern.checked,
           confusingItems: this.confusingItems.value,
           comments: this.comments.value
@@ -1099,6 +1144,7 @@ export class AppController {
             <label class="form-group"><span class="form-label">${fr ? 'Savez-vous quand obtenir plus d’aide?' : 'Know when to escalate?'}</span><select name="knowsEscalation" class="form-select"><option value="yes">${t(this.locale, 'yes')}</option><option value="no">${t(this.locale, 'no')}</option></select></label>
             <label class="form-group"><span class="form-label">${fr ? 'Pouvez-vous suivre ce plan?' : 'Can you follow this plan?'}</span><select name="canFollow" class="form-select"><option value="yes">${t(this.locale, 'yes')}</option><option value="maybe">${fr ? 'Peut-être' : 'Maybe'}</option><option value="no">${t(this.locale, 'no')}</option></select></label>
             <label class="form-group"><span class="form-label">${fr ? 'Principal obstacle' : 'Main access barrier'}</span><select name="accessBarrier" class="form-select"><option value="">${fr ? 'Aucun' : 'None'}</option><option value="transportation">${fr ? 'Transport' : 'Transportation'}</option><option value="childcare">${fr ? 'Garde d’enfants' : 'Childcare'}</option><option value="distance">Distance</option><option value="cost">${fr ? 'Coût' : 'Cost'}</option><option value="language">${fr ? 'Langue' : 'Language'}</option><option value="mobility">${fr ? 'Mobilité ou handicap' : 'Mobility or disability'}</option><option value="trust">${fr ? 'Sécurité culturelle ou confiance' : 'Cultural safety or trust'}</option></select></label>
+            <label class="form-group"><span class="form-label">${fr ? 'Ces conseils étaient-ils culturellement respectueux?' : 'Did this guidance feel culturally respectful?'}</span><select name="culturallyRespectful" class="form-select"><option value="yes">${t(this.locale, 'yes')}</option><option value="mostly">${fr ? 'En grande partie' : 'Mostly'}</option><option value="no">${t(this.locale, 'no')}</option><option value="prefer_not_to_answer">${fr ? 'Je préfère ne pas répondre' : 'Prefer not to answer'}</option></select></label>
           </div>
           <label class="safety-checkbox"><input type="checkbox" name="unsafeConcern" /> ${fr ? 'Je crois qu’un élément de ces conseils pourrait être dangereux.' : 'I believe something about this guidance could be unsafe.'}</label>
           ${compact ? '<input type="hidden" name="confusingItems" value="" />' : `<label class="form-group"><span class="form-label">${fr ? 'Quelque chose était-il déroutant ou manquant?' : 'Was anything confusing or missing?'}</span><input type="text" name="confusingItems" class="form-control" placeholder="${fr ? 'Facultatif' : 'Optional'}" /></label>`}
@@ -1174,6 +1220,11 @@ export class AppController {
             <div class="metric-subtext">Patients reporting “Yes”</div>
           </div>
           <div class="metric-card">
+            <div class="metric-title">Cultural Respect</div>
+            <div class="metric-value" style="color: var(--color-primary);">${metrics.culturalRespectRate}</div>
+            <div class="metric-subtext">Yes or mostly among responses</div>
+          </div>
+          <div class="metric-card">
             <div class="metric-title">Safety Concerns</div>
             <div class="metric-value" style="color: var(--color-warning);">${metrics.safetyConcernCount}</div>
             <div class="metric-subtext">Flagged for QI review</div>
@@ -1183,6 +1234,7 @@ export class AppController {
         <div class="dashboard-insight-grid">
           <div class="card"><div class="eyebrow">CARE DESTINATIONS</div><h3>${metrics.emergencyCount} emergency · ${metrics.communityCount} community/home</h3><p>Shows where the governed pathways recommended care—not whether an ED visit was definitively avoided.</p></div>
           <div class="card"><div class="eyebrow">ACCESS BARRIERS</div><h3>${topBarriers.length ? topBarriers.map(([key, count]) => `${escapeHtml(key)} (${count})`).join(' · ') : 'No barriers reported'}</h3><p>Barriers help planners understand whether a recommendation is realistically actionable.</p></div>
+          <div class="card"><div class="eyebrow">FIRST NATIONS SERVICE REQUESTS</div><h3>${metrics.fnhaRequestCount} explicit opt-in${metrics.fnhaRequestCount === 1 ? '' : 's'}</h3><p>Service preference is recorded only when requested; location is never used to infer identity.</p></div>
           <div class="card"><div class="eyebrow">PROVIDER AGREEMENT</div><h3>${metrics.staffAgreementRate}</h3><p>Disposition agreement among completed synthetic staff reviews.</p></div>
         </div>
 
@@ -1257,7 +1309,7 @@ export class AppController {
           <section class="architecture-lane patient-lane">
             <div class="lane-title"><span>Patient-facing layer</span><small>Listen · assess · explain · navigate</small></div>
             <div class="architecture-flow">
-              <div class="architecture-node"><b>Patient or caregiver</b><small>Describes the concern in their own words</small></div>
+              <div class="architecture-node"><b>Adult patient or caregiver</b><small>Confirms age 18+ and describes the concern in their own words</small></div>
               <div class="architecture-arrow">→</div>
               <div class="architecture-node agent-node"><b>Agent 1</b><small>Safety intake and structured facts</small></div>
               <div class="architecture-arrow">→</div>
@@ -1291,6 +1343,7 @@ export class AppController {
           <div class="card"><div class="eyebrow">SAFETY BOUNDARY</div><h3>Agents cannot override the rule engine</h3><p>Conversational components may listen, structure, explain and classify. They cannot change urgency, route, rule ID, version or safety-net instructions.</p></div>
           <div class="card"><div class="eyebrow">DATA BOUNDARY</div><h3>Synthetic local demonstration data</h3><p>No names, health numbers, addresses or real clinical-system connections are used in this academic prototype.</p></div>
           <div class="card"><div class="eyebrow">INTEGRATION BOUNDARY</div><h3>Conceptual service routing</h3><p>911, HealthLink BC 8-1-1, HEiDi, RTVS, EHRs and service directories are not connected.</p></div>
+          <div class="card"><div class="eyebrow">EQUITY BOUNDARY</div><h3>Explicit choice, never inferred identity</h3><p>First Nations-specific services appear only after opt-in and only when they do not conflict with emergency or hands-on care.</p></div>
         </div>
       </div>
     `;
@@ -1435,9 +1488,11 @@ export class AppController {
                     <span>Trust <strong>${enc.patientFeedback.trustScore || 'N/A'}/5</strong></span>
                     <span>Can follow <strong>${escapeHtml(enc.patientFeedback.canFollow || 'N/A')}</strong></span>
                     <span>Barrier <strong>${escapeHtml(enc.patientFeedback.accessBarrier || 'None')}</strong></span>
+                    <span>Cultural respect <strong>${escapeHtml(enc.patientFeedback.culturallyRespectful || 'Not asked')}</strong></span>
                   </div>
                   <p><strong>Comment:</strong> ${escapeHtml(enc.patientFeedback.comments || 'No comment provided.')}</p>
                   <p><strong>Feedback stream:</strong> ${escapeHtml(enc.feedbackAnalysis?.feedbackStream || 'PATIENT_EXPERIENCE')}</p>
+                  ${enc.accessContext ? `<p><strong>Access context:</strong> ${escapeHtml(enc.accessContext.community || 'N/A')} · First Nations services ${enc.accessContext.firstNationsServicesRequested ? 'requested' : 'not requested'}</p>` : ''}
                 ` : '<p>Patient feedback has not yet been submitted. The recommendation was still retained for quality review.</p>'}
               </div>
 
