@@ -1,6 +1,6 @@
 /**
  * ED COMPASS - Fever Clinical Rules
- * Prototype Version: 1.0
+ * Prototype Version: 1.2
  * Disclaimer: Prototype rule — requires clinical validation before real-world use.
  * 
  * IMPORTANT CLINICAL DESIGN RULE:
@@ -10,7 +10,7 @@
 
 import { Disposition } from '../types.js';
 
-export const FEVER_PATHWAY_VERSION = '1.1';
+export const FEVER_PATHWAY_VERSION = '1.2';
 
 export const feverRules = [
   {
@@ -22,16 +22,13 @@ export const feverRules = [
     destinationType: 'Emergency Services (911)',
     condition: (facts) => 
       facts.severeBreathingDifficulty === true ||
-      facts.severeBreathingDifficulty === null ||
       facts.unresponsiveOrSeverelyConfused === true ||
-      facts.unresponsiveOrSeverelyConfused === null ||
-      facts.blueLipsOrFace === true ||
-      facts.blueLipsOrFace === null,
+      facts.blueLipsOrFace === true,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.severeBreathingDifficulty === true || facts.severeBreathingDifficulty === null) triggers.push('severeBreathingDifficulty');
-      if (facts.unresponsiveOrSeverelyConfused === true || facts.unresponsiveOrSeverelyConfused === null) triggers.push('unresponsiveOrSeverelyConfused');
-      if (facts.blueLipsOrFace === true || facts.blueLipsOrFace === null) triggers.push('blueLipsOrFace');
+      if (facts.severeBreathingDifficulty === true) triggers.push('severeBreathingDifficulty');
+      if (facts.unresponsiveOrSeverelyConfused === true) triggers.push('unresponsiveOrSeverelyConfused');
+      if (facts.blueLipsOrFace === true) triggers.push('blueLipsOrFace');
       return triggers;
     },
     explanationKey: 'Severe respiratory distress (gasping, unable to speak full words), severe confusion/lethargy, or blue lips/skin indicate critical physiological instability requiring emergency dispatch.',
@@ -44,83 +41,81 @@ export const feverRules = [
   {
     id: 'FEVER-E02',
     version: FEVER_PATHWAY_VERSION,
-    name: 'Infant / Meningeal Sign / Concerning Rash',
+    name: 'Meningeal Sign / Concerning Rash',
     disposition: Disposition.GO_TO_ED_NOW,
     timing: 'Go Now',
     destinationType: 'Emergency Department',
     condition: (facts) => 
-      facts.isInfantUnder3Months === true ||
-      facts.isInfantUnder3Months === null ||
       facts.neckStiffnessOrSevereHeadache === true ||
-      facts.neckStiffnessOrSevereHeadache === null ||
       facts.nonBlanchingPurpuricRash === true ||
-      facts.nonBlanchingPurpuricRash === null ||
-      facts.severeRapidDeterioration === true ||
-      facts.severeRapidDeterioration === null,
+      facts.severeRapidDeterioration === true,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.isInfantUnder3Months === true || facts.isInfantUnder3Months === null) triggers.push('isInfantUnder3Months');
-      if (facts.neckStiffnessOrSevereHeadache === true || facts.neckStiffnessOrSevereHeadache === null) triggers.push('neckStiffnessOrSevereHeadache');
-      if (facts.nonBlanchingPurpuricRash === true || facts.nonBlanchingPurpuricRash === null) triggers.push('nonBlanchingPurpuricRash');
-      if (facts.severeRapidDeterioration === true || facts.severeRapidDeterioration === null) triggers.push('severeRapidDeterioration');
+      if (facts.neckStiffnessOrSevereHeadache === true) triggers.push('neckStiffnessOrSevereHeadache');
+      if (facts.nonBlanchingPurpuricRash === true) triggers.push('nonBlanchingPurpuricRash');
+      if (facts.severeRapidDeterioration === true) triggers.push('severeRapidDeterioration');
       return triggers;
     },
-    explanationKey: 'Fever in a young infant (<3 months), fever with neck stiffness/photophobia, a dark purple non-fading rash, or rapid systemic collapse require urgent Emergency Department evaluation.',
+    explanationKey: 'Fever with neck stiffness/photophobia, a dark purple non-fading rash, or rapid systemic collapse require urgent Emergency Department evaluation.',
     safetyNet: [
       'Transport directly to the nearest Emergency Department.',
-      'Keep infant comfortable and monitor breathing closely during travel.',
+      'Keep patient comfortable and monitor breathing closely during travel.',
       'If skin color changes or lethargy worsens, call 911 immediately.'
     ]
   },
   {
     id: 'FEVER-H01',
     version: FEVER_PATHWAY_VERSION,
-    name: 'High-Risk Host / Neutropenia / Chemotherapy',
+    name: 'High-Risk Host / Neutropenia / Chemotherapy / Transplant / Immunosuppression',
     disposition: Disposition.GO_TO_ED_NOW,
     timing: 'Go Now (Specialist Protocol)',
     destinationType: 'Emergency Department / Cancer Centre On-Call',
     condition: (facts) => 
       facts.onChemotherapyOrNeutropenic === true ||
-      facts.onChemotherapyOrNeutropenic === null ||
+      facts.organOrStemCellTransplant === true ||
+      facts.immunosuppressiveTherapies === true ||
       facts.significantImmunosuppression === true ||
-      facts.significantImmunosuppression === null ||
       facts.organTransplantOrBiologic === true,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.onChemotherapyOrNeutropenic) triggers.push('onChemotherapyOrNeutropenic');
-      if (facts.significantImmunosuppression) triggers.push('significantImmunosuppression');
-      if (facts.organTransplantOrBiologic) triggers.push('organTransplantOrBiologic');
+      if (facts.onChemotherapyOrNeutropenic === true) triggers.push('onChemotherapyOrNeutropenic');
+      if (facts.organOrStemCellTransplant === true) triggers.push('organOrStemCellTransplant');
+      if (facts.immunosuppressiveTherapies === true) triggers.push('immunosuppressiveTherapies');
+      if (facts.significantImmunosuppression === true) triggers.push('significantImmunosuppression');
+      if (facts.organTransplantOrBiologic === true) triggers.push('organTransplantOrBiologic');
       return triggers;
     },
-    explanationKey: 'Patients undergoing chemotherapy, organ transplant recipients, or individuals with severe immunosuppression with a fever require immediate emergency medical assessment due to high risk of rapid infection progression.',
+    explanationKey: 'Patients receiving chemotherapy, organ/stem-cell transplant recipients, or individuals taking high-dose immunosuppressive therapies with a fever require immediate emergency medical assessment due to high risk of rapid infection progression.',
     safetyNet: [
       'Bring your oncology/transplant emergency wallet card or clinic contact numbers.',
-      'Inform ED triage staff immediately upon arrival that you are an immunocompromised/chemotherapy patient.',
+      'Inform ED triage staff immediately upon arrival that you are an immunocompromised/chemotherapy/transplant patient.',
       'Wear a surgical mask in waiting areas.'
     ]
   },
   {
     id: 'FEVER-U01',
     version: FEVER_PATHWAY_VERSION,
-    name: 'Dehydration Risk / Prolonged Fever / Severe Localizing Pain',
+    name: 'Dehydration Risk / Prolonged Fever (3+ Days) / Primary Care Assessment',
     disposition: Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
     timing: 'Today (Within 12-24 hours)',
-    destinationType: 'Urgent Care Centre / Same-Day Clinic',
+    destinationType: 'Urgent Care Centre / Family Doctor / Same-Day Clinic',
     condition: (facts) => 
       facts.unableToKeepFluidsDown === true ||
+      facts.feverDuration3DaysPlus === true ||
       (facts.durationDays || 0) >= 3 ||
       facts.severeLocalizingPain === true ||
       facts.pregnancy === true,
     triggeredBy: (facts) => {
       const triggers = [];
-      if (facts.unableToKeepFluidsDown) triggers.push('unableToKeepFluidsDown');
-      if (facts.durationDays >= 3) triggers.push('durationDaysGe3');
-      if (facts.severeLocalizingPain) triggers.push('severeLocalizingPain');
-      if (facts.pregnancy) triggers.push('pregnancy');
+      if (facts.unableToKeepFluidsDown === true) triggers.push('unableToKeepFluidsDown');
+      if (facts.feverDuration3DaysPlus === true || (facts.durationDays || 0) >= 3) triggers.push('feverDuration3DaysPlus');
+      if (facts.severeLocalizingPain === true) triggers.push('severeLocalizingPain');
+      if (facts.pregnancy === true) triggers.push('pregnancy');
       return triggers;
     },
-    explanationKey: 'A fever lasting 3+ days, inability to stay hydrated due to persistent vomiting, pregnancy with fever, or severe localized pain (e.g. flank/kidney pain) requires same-day medical assessment.',
+    explanationKey: 'A fever lasting 3 days or longer warrants medical evaluation by your family doctor or primary care provider, as well as inability to stay hydrated due to persistent vomiting or pregnancy with fever.',
     safetyNet: [
+      'Contact your family doctor or primary care clinic to arrange an assessment.',
       'Take frequent small sips of oral rehydration solution or clear fluids.',
       'Rest in a cool environment.',
       'Escalate to the Emergency Department if confusion, shortness of breath, or dark purple spots appear on the skin.'
@@ -136,16 +131,19 @@ export const feverRules = [
     condition: (facts) => 
       facts.severeBreathingDifficulty !== true &&
       facts.unresponsiveOrSeverelyConfused !== true &&
-      facts.isInfantUnder3Months !== true &&
       facts.neckStiffnessOrSevereHeadache !== true &&
-      facts.onChemotherapyOrNeutropenic !== true,
+      facts.onChemotherapyOrNeutropenic !== true &&
+      facts.organOrStemCellTransplant !== true &&
+      facts.immunosuppressiveTherapies !== true &&
+      facts.feverDuration3DaysPlus !== true &&
+      (facts.durationDays || 0) < 3,
     triggeredBy: () => ['uncomplicated_short_duration_fever'],
     explanationKey: 'The short safety screen did not identify an emergency warning sign based on your reported symptoms.',
     safetyNet: [
       'Rest adequately and drink plenty of fluids (water, broth, diluted juices).',
       'Use over-the-counter fever reducers (acetaminophen or ibuprofen) if appropriate for your health history.',
       'Monitor temperature and symptom progression.',
-      'Contact primary care or 8-1-1 if fever persists beyond 3 days or if new warning signs develop.'
+      'Contact your family doctor, primary care clinic, or 8-1-1 if fever persists for 3 days or longer or if new warning signs develop.'
     ]
   }
 ];

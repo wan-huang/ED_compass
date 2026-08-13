@@ -183,13 +183,6 @@ export const INTAKE_QUESTIONS = {
       category: 'Circulation / Oxygenation'
     },
     {
-      id: 'isInfantUnder3Months',
-      label: 'Is the patient an infant under 3 months old with a fever (temperature 38.0°C / 100.4°F or higher)?',
-      type: 'boolean',
-      isEmergencyRedFlag: true,
-      category: 'Pediatric Red Flag'
-    },
-    {
       id: 'neckStiffnessOrSevereHeadache',
       label: 'Is the fever accompanied by a very stiff neck or severe intense headache?',
       type: 'boolean',
@@ -205,13 +198,19 @@ export const INTAKE_QUESTIONS = {
     },
     {
       id: 'onChemotherapyOrNeutropenic',
-      label: 'Are you currently undergoing chemotherapy or have a known low neutrophil (white blood cell) count?',
+      label: 'Are you receiving chemotherapy, recently received chemotherapy, or do you have known neutropenia?',
       type: 'boolean',
       category: 'Oncology / Immunosuppression'
     },
     {
-      id: 'significantImmunosuppression',
-      label: 'Have you had an organ transplant, or are you taking high-dose immunosuppressive therapies?',
+      id: 'organOrStemCellTransplant',
+      label: 'Have you had an organ or stem-cell transplant?',
+      type: 'boolean',
+      category: 'Immune Risk'
+    },
+    {
+      id: 'immunosuppressiveTherapies',
+      label: 'Are you taking high-dose immunosuppressive therapies or medications that weaken your immune system?',
       type: 'boolean',
       category: 'Immune Risk'
     },
@@ -222,14 +221,9 @@ export const INTAKE_QUESTIONS = {
       category: 'Hydration Status'
     },
     {
-      id: 'durationDays',
-      label: 'How many days has the fever been present?',
-      type: 'select',
-      options: [
-        { value: 1, label: 'Less than 24 hours' },
-        { value: 2, label: '1 to 2 days' },
-        { value: 3, label: '3 days or longer' }
-      ],
+      id: 'feverDuration3DaysPlus',
+      label: 'Has your fever lasted 3 days or longer?',
+      type: 'boolean',
       category: 'Duration'
     },
     {
@@ -274,14 +268,12 @@ export class IntakeAgent {
       ? [...new Set([...sessionState.uncertainties, fieldId])] 
       : sessionState.uncertainties.filter(id => id !== fieldId);
 
-    // Check emergency red flag condition
+    // Check emergency red flag condition.
+    // "I'm not sure" (isUnsure) is NOT treated as a yes and keeps the pathway going.
     let emergencyStopDetected = sessionState.emergencyStopDetected;
     let emergencyTriggerField = sessionState.emergencyTriggerField;
 
-    // Safety-critical uncertainty is handled conservatively. A patient who
-    // cannot rule out an emergency warning sign receives the same early stop
-    // as a reported warning sign.
-    if (questionDef && questionDef.isEmergencyRedFlag && (value === true || isUnsure)) {
+    if (questionDef && questionDef.isEmergencyRedFlag && value === true) {
       emergencyStopDetected = true;
       emergencyTriggerField = fieldId;
     }

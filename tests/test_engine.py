@@ -36,26 +36,28 @@ def evaluate_nail_puncture(facts):
 
 def evaluate_headache(facts):
     if facts.get('thunderclapOnset') or facts.get('focalNeuroDeficit') or facts.get('seizureOrSyncope') or facts.get('feverWithStiffNeck'):
-        return {'disposition': DISPOSITIONS['CALL_911_NOW'], 'ruleId': 'HEADACHE-E01', 'version': '1.0'}
-    if (facts.get('firstWorstHeadache') or facts.get('recentHeadTrauma') or facts.get('anticoagulantUse') or
-        facts.get('painfulRedEyeWithVisionLoss') or facts.get('immunocompromisedOrCancer') or
-        facts.get('pregnancyOrPostpartum') or (facts.get('age', 0) >= 50 and facts.get('newOrChangedHeadache'))):
-        return {'disposition': DISPOSITIONS['GO_TO_ED_NOW'], 'ruleId': 'HEADACHE-E02', 'version': '1.0'}
-    if facts.get('progressiveWorsening') or facts.get('positionalOnset') or facts.get('exertionalOnset') or facts.get('persistentVomiting'):
-        return {'disposition': DISPOSITIONS['SAME_DAY_CLINICAL_ASSESSMENT'], 'ruleId': 'HEADACHE-U01', 'version': '1.0'}
-    return {'disposition': DISPOSITIONS['HOME_MONITOR_WITH_SAFETY_NET'], 'ruleId': 'HEADACHE-L01', 'version': '1.0'}
+        return {'disposition': DISPOSITIONS['CALL_911_NOW'], 'ruleId': 'HEADACHE-E01', 'version': '1.2'}
+    if (facts.get('firstWorstHeadache') or facts.get('recentHeadTrauma') or
+        facts.get('painfulRedEyeWithVisionLoss') or (facts.get('age', 0) >= 50 and facts.get('newOrChangedHeadache')) or
+        (facts.get('anticoagulantUse') and (facts.get('recentHeadTrauma') or facts.get('persistentVomiting') or facts.get('firstWorstHeadache') or facts.get('newOrChangedHeadache')))):
+        return {'disposition': DISPOSITIONS['GO_TO_ED_NOW'], 'ruleId': 'HEADACHE-E02', 'version': '1.2'}
+    if (facts.get('anticoagulantUse') or facts.get('immunocompromisedOrCancer') or facts.get('pregnancyOrPostpartum') or
+        facts.get('progressiveWorsening') or facts.get('positionalOnset') or facts.get('exertionalOnset') or facts.get('persistentVomiting')):
+        return {'disposition': DISPOSITIONS['SAME_DAY_CLINICAL_ASSESSMENT'], 'ruleId': 'HEADACHE-U01', 'version': '1.2'}
+    return {'disposition': DISPOSITIONS['HOME_MONITOR_WITH_SAFETY_NET'], 'ruleId': 'HEADACHE-L01', 'version': '1.2'}
 
 def evaluate_fever(facts):
     if facts.get('severeBreathingDifficulty') or facts.get('unresponsiveOrSeverelyConfused') or facts.get('blueLipsOrFace'):
-        return {'disposition': DISPOSITIONS['CALL_911_NOW'], 'ruleId': 'FEVER-E01', 'version': '1.0'}
-    if (facts.get('isInfantUnder3Months') or facts.get('neckStiffnessOrSevereHeadache') or
-        facts.get('nonBlanchingPurpuricRash') or facts.get('severeRapidDeterioration')):
-        return {'disposition': DISPOSITIONS['GO_TO_ED_NOW'], 'ruleId': 'FEVER-E02', 'version': '1.0'}
-    if facts.get('onChemotherapyOrNeutropenic') or facts.get('significantImmunosuppression') or facts.get('organTransplantOrBiologic'):
-        return {'disposition': DISPOSITIONS['GO_TO_ED_NOW'], 'ruleId': 'FEVER-H01', 'version': '1.0'}
-    if facts.get('unableToKeepFluidsDown') or (facts.get('durationDays') or 0) >= 3 or facts.get('severeLocalizingPain') or facts.get('pregnancy'):
-        return {'disposition': DISPOSITIONS['SAME_DAY_CLINICAL_ASSESSMENT'], 'ruleId': 'FEVER-U01', 'version': '1.0'}
-    return {'disposition': DISPOSITIONS['HOME_MONITOR_WITH_SAFETY_NET'], 'ruleId': 'FEVER-L01', 'version': '1.0'}
+        return {'disposition': DISPOSITIONS['CALL_911_NOW'], 'ruleId': 'FEVER-E01', 'version': '1.2'}
+    if (facts.get('neckStiffnessOrSevereHeadache') or facts.get('nonBlanchingPurpuricRash') or facts.get('severeRapidDeterioration')):
+        return {'disposition': DISPOSITIONS['GO_TO_ED_NOW'], 'ruleId': 'FEVER-E02', 'version': '1.2'}
+    if (facts.get('onChemotherapyOrNeutropenic') or facts.get('organOrStemCellTransplant') or
+        facts.get('immunosuppressiveTherapies') or facts.get('significantImmunosuppression') or facts.get('organTransplantOrBiologic')):
+        return {'disposition': DISPOSITIONS['GO_TO_ED_NOW'], 'ruleId': 'FEVER-H01', 'version': '1.2'}
+    if (facts.get('unableToKeepFluidsDown') or facts.get('feverDuration3DaysPlus') or
+        (facts.get('durationDays') or 0) >= 3 or facts.get('severeLocalizingPain') or facts.get('pregnancy')):
+        return {'disposition': DISPOSITIONS['SAME_DAY_CLINICAL_ASSESSMENT'], 'ruleId': 'FEVER-U01', 'version': '1.2'}
+    return {'disposition': DISPOSITIONS['HOME_MONITOR_WITH_SAFETY_NET'], 'ruleId': 'FEVER-L01', 'version': '1.2'}
 
 
 class TestEDCompassPathways(unittest.TestCase):
@@ -100,8 +102,12 @@ class TestEDCompassPathways(unittest.TestCase):
 
     def test_headache_high_risk_host_anticoagulant(self):
         res = evaluate_headache({'anticoagulantUse': True})
-        self.assertEqual(res['disposition'], DISPOSITIONS['GO_TO_ED_NOW'])
-        self.assertEqual(res['ruleId'], 'HEADACHE-E02')
+        self.assertEqual(res['disposition'], DISPOSITIONS['SAME_DAY_CLINICAL_ASSESSMENT'])
+        self.assertEqual(res['ruleId'], 'HEADACHE-U01')
+
+        res_trauma = evaluate_headache({'anticoagulantUse': True, 'recentHeadTrauma': True})
+        self.assertEqual(res_trauma['disposition'], DISPOSITIONS['GO_TO_ED_NOW'])
+        self.assertEqual(res_trauma['ruleId'], 'HEADACHE-E02')
 
     def test_headache_age_50_plus_new(self):
         res = evaluate_headache({'age': 55, 'newOrChangedHeadache': True})
@@ -124,10 +130,10 @@ class TestEDCompassPathways(unittest.TestCase):
         self.assertEqual(res['disposition'], DISPOSITIONS['CALL_911_NOW'])
         self.assertEqual(res['ruleId'], 'FEVER-E01')
 
-    def test_fever_infant_under_3_months(self):
-        res = evaluate_fever({'isInfantUnder3Months': True})
+    def test_fever_organ_transplant_host_risk(self):
+        res = evaluate_fever({'organOrStemCellTransplant': True})
         self.assertEqual(res['disposition'], DISPOSITIONS['GO_TO_ED_NOW'])
-        self.assertEqual(res['ruleId'], 'FEVER-E02')
+        self.assertEqual(res['ruleId'], 'FEVER-H01')
 
     def test_fever_chemotherapy_host_risk(self):
         """CRITICAL: Test host-risk escalation without CTAS/qSOFA calculation."""
@@ -135,10 +141,14 @@ class TestEDCompassPathways(unittest.TestCase):
         self.assertEqual(res['disposition'], DISPOSITIONS['GO_TO_ED_NOW'])
         self.assertEqual(res['ruleId'], 'FEVER-H01')
 
-    def test_fever_urgent_duration_ge_3_days(self):
-        res = evaluate_fever({'durationDays': 3})
+    def test_fever_duration_3_days_plus_recommends_family_doctor_unless_overruled(self):
+        res = evaluate_fever({'feverDuration3DaysPlus': True})
         self.assertEqual(res['disposition'], DISPOSITIONS['SAME_DAY_CLINICAL_ASSESSMENT'])
         self.assertEqual(res['ruleId'], 'FEVER-U01')
+
+        overruled = evaluate_fever({'feverDuration3DaysPlus': True, 'onChemotherapyOrNeutropenic': True})
+        self.assertEqual(overruled['disposition'], DISPOSITIONS['GO_TO_ED_NOW'])
+        self.assertEqual(overruled['ruleId'], 'FEVER-H01')
 
     def test_fever_urgent_unable_to_keep_fluids(self):
         res = evaluate_fever({'unableToKeepFluidsDown': True})
@@ -146,13 +156,14 @@ class TestEDCompassPathways(unittest.TestCase):
         self.assertEqual(res['ruleId'], 'FEVER-U01')
 
     def test_fever_lower_risk_uncomplicated(self):
-        res = evaluate_fever({'durationDays': 1})
+        res = evaluate_fever({'feverDuration3DaysPlus': False})
         self.assertEqual(res['disposition'], DISPOSITIONS['HOME_MONITOR_WITH_SAFETY_NET'])
         self.assertEqual(res['ruleId'], 'FEVER-L01')
 
     def test_fever_unsure_answers_handled_conservatively(self):
         """Test 'I am not sure' answers do not fail or throw errors."""
-        res = evaluate_fever({'durationDays': None, 'severeBreathingDifficulty': None})
+        res = evaluate_fever({'feverDuration3DaysPlus': None, 'severeBreathingDifficulty': None})
+        self.assertEqual(res['disposition'], DISPOSITIONS['HOME_MONITOR_WITH_SAFETY_NET'])
         self.assertIn(res['disposition'], DISPOSITIONS.values())
 
     # --- AGENT SAFETY BOUNDARY TESTS (3 Cases) ---

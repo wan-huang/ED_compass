@@ -732,6 +732,7 @@ export class AppController {
           </div>
         </div>
 
+        ${this.renderTriageFrameworksBox()}
         ${this.renderFeedbackForm(true)}
       </div>
     `;
@@ -813,16 +814,6 @@ export class AppController {
         ${this.renderCareOptions()}
 
         <div class="card">
-          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">${t(this.locale, 'why')}</h3>
-          ${nav.triggeringFactsFormatted.length > 0 ? `
-            <div style="background-color: var(--color-bg); padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1.5rem;">
-              <div style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.5rem;">${t(this.locale, 'factors')}:</div>
-              <ul style="padding-left: 1.25rem; font-size: 0.9rem; color: var(--color-text-primary);">
-                ${nav.triggeringFactsFormatted.map(f => `<li>${f}</li>`).join('')}
-              </ul>
-            </div>
-          ` : ''}
-
           <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem;">${t(this.locale, 'safetyNet')}</h3>
           <ul style="padding-left: 1.25rem; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem;">
             ${nav.safetyNetInstructions.map(instr => `<li>${instr}</li>`).join('')}
@@ -832,7 +823,123 @@ export class AppController {
             ℹ️ ${t(this.locale, 'conceptual')}
           </div>
         </div>
+        ${this.renderTriageFrameworksBox()}
         ${this.renderFeedbackForm(false)}
+      </div>
+    `;
+  }
+
+  renderTriageFrameworksBox() {
+    const nav = localizeNavigation(this.locale, this.currentNavigation, this.currentRuleResult?.disposition);
+    const scenario = this.currentSession?.scenario || this.currentHandoff?.scenario;
+    const answers = this.currentHandoff?.answers || this.currentSession?.answers || {};
+    const tools = [];
+
+    if (scenario === Scenario.HEADACHE) {
+      if (answers.thunderclapOnset === true) {
+        tools.push('SNNOOP10: O — sudden Onset');
+      }
+      if (answers.focalNeuroDeficit === true) {
+        tools.push('SNNOOP10: N — Neurologic deficit');
+      }
+      if (answers.seizureOrSyncope === true) {
+        tools.push('SNNOOP10: N — Neurologic dysfunction');
+      }
+      if (answers.feverWithStiffNeck === true) {
+        tools.push('SNNOOP10: S — Systemic symptoms, strengthened by meningismus');
+      }
+      if (answers.firstWorstHeadache === true) {
+        tools.push('Pattern change/recent onset; “worst” also overlaps sudden-onset concerns');
+      }
+      if (answers.recentHeadTrauma === true) {
+        tools.push('SNNOOP10: Posttraumatic onset');
+      }
+      if (answers.anticoagulantUse === true) {
+        tools.push('Evidence-based clinical risk modifier — anticoagulation');
+      }
+      if (answers.painfulRedEyeWithVisionLoss === true) {
+        tools.push('SNNOOP10: Painful eye + acute-glaucoma red flag');
+      }
+      if (answers.immunocompromisedOrCancer === true) {
+        tools.push('Immunocompromised');
+      }
+      if (answers.pregnancyOrPostpartum === true) {
+        tools.push('SNNOOP10: Pregnancy/puerperium');
+      }
+      if (answers.age >= 50 || answers.newOrChangedHeadache === true) {
+        tools.push('SNNOOP10: O — Older age');
+      }
+      if (tools.length === 0) {
+        tools.push('SNNOOP10 headache red flag screening');
+      }
+    } else {
+      if (answers.severeBreathingDifficulty === true) {
+        tools.push('CTAS, qSOFA, SIRS');
+      }
+      if (answers.unresponsiveOrSeverelyConfused === true || answers.seizureOrSyncope === true) {
+        tools.push('CTAS, qSOFA');
+      }
+      if (
+        answers.blueLipsOrFace === true ||
+        answers.onChemotherapyOrNeutropenic === true ||
+        answers.organOrStemCellTransplant === true ||
+        answers.organTransplantOrBiologic === true ||
+        answers.immunosuppressiveTherapies === true ||
+        answers.significantImmunosuppression === true ||
+        answers.immunocompromisedOrCancer === true
+      ) {
+        tools.push('CTAS');
+      }
+
+      const redFlagKeys = [
+        'neckStiffnessOrSevereHeadache',
+        'nonBlanchingPurpuricRash',
+        'thunderclapOnset',
+        'focalNeuroDeficit',
+        'feverWithStiffNeck',
+        'firstWorstHeadache',
+        'recentHeadTrauma',
+        'anticoagulantUse',
+        'painfulRedEyeWithVisionLoss',
+        'pregnancyOrPostpartum',
+        'newOrChangedHeadache',
+        'uncontrolledBleeding',
+        'numbnessOrCirculationIssue',
+        'objectEmbedded',
+        'deepPenetration',
+        'grossContamination',
+        'worseningPainOrSwelling',
+        'unableToKeepFluidsDown',
+        'pregnancy'
+      ];
+
+      const hasRedFlags = redFlagKeys.some(k => answers[k] === true) || answers.feverDuration3DaysPlus === true || (answers.durationDays || 0) >= 3;
+      if (hasRedFlags || tools.length === 0) {
+        tools.push('evidence-based clinical red flags');
+      }
+    }
+
+    const uniqueTools = [...new Set(tools)];
+    const triggeringFacts = nav?.triggeringFactsFormatted || [];
+
+    return `
+      <div class="card triage-frameworks-box" style="background: #F8FAFC; border: 1px solid #CBD5E1; border-left: 4px solid #0EA5E9; padding: 1.25rem; border-radius: var(--radius-lg); margin-bottom: 1.5rem;">
+        <div style="font-size: 0.78rem; font-weight: 800; color: #0284C7; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 0.5rem;">CLINICAL TRIAGE GOVERNANCE</div>
+
+        <h3 style="font-size: 1.1rem; font-weight: 700; color: #0F172A; margin-bottom: 0.5rem;">${t(this.locale, 'why')}</h3>
+        ${triggeringFacts.length > 0 ? `
+          <div style="background-color: #FFFFFF; border: 1px solid #E2E8F0; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1.25rem;">
+            <div style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.5rem;">${t(this.locale, 'factors')}:</div>
+            <ul style="padding-left: 1.25rem; font-size: 0.9rem; color: var(--color-text-primary);">
+              ${triggeringFacts.map(f => `<li>${f}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+
+        <h4 style="font-size: 1.05rem; font-weight: 700; color: #0F172A; margin-bottom: 0.75rem;">Frameworks informing triage logic:</h4>
+        <ul style="padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9rem; color: #334155; font-weight: 600;">
+          ${uniqueTools.map(tool => `<li>${tool}</li>`).join('')}
+        </ul>
       </div>
     `;
   }

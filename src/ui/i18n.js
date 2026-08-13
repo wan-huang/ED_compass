@@ -188,13 +188,13 @@ const frenchQuestionLabels = {
   severeBreathingDifficulty: 'Avez-vous beaucoup de difficulté à respirer ou êtes-vous incapable de parler en phrases complètes?',
   unresponsiveOrSeverelyConfused: 'La personne est-elle difficile à réveiller ou très confuse?',
   blueLipsOrFace: 'Les lèvres, la langue ou le visage deviennent-ils bleus ou gris?',
-  isInfantUnder3Months: 'La personne est-elle un bébé de moins de trois mois avec une température d’au moins 38 °C?',
   neckStiffnessOrSevereHeadache: 'La fièvre est-elle accompagnée d’une nuque très raide ou d’un mal de tête intense?',
   nonBlanchingPurpuricRash: 'Y a-t-il de nouvelles taches rouge foncé ou violettes qui ne pâlissent pas sous la pression?',
-  onChemotherapyOrNeutropenic: 'Recevez-vous actuellement une chimiothérapie ou savez-vous que vos globules blancs sont faibles?',
-  significantImmunosuppression: 'Avez-vous reçu une greffe ou prenez-vous un traitement immunosuppresseur important?',
+  onChemotherapyOrNeutropenic: 'Recevez-vous de la chimiothérapie, en avez-vous reçu récemment ou savez-vous que vous avez une neutropénie?',
+  organOrStemCellTransplant: 'Avez-vous reçu une greffe d’organe ou de cellules souches?',
+  immunosuppressiveTherapies: 'Prenez-vous des traitements immunosuppresseurs à haute dose ou des médicaments qui affaiblissent votre système immunitaire?',
   unableToKeepFluidsDown: 'Êtes-vous complètement incapable de garder des liquides à cause de vomissements persistants?',
-  durationDays: 'Depuis combien de jours avez-vous de la fièvre?',
+  feverDuration3DaysPlus: 'Votre fièvre dure-t-elle depuis 3 jours ou plus?',
   pregnancy: 'Êtes-vous enceinte?'
 };
 
