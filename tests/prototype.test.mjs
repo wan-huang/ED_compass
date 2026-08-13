@@ -25,11 +25,41 @@ test('rust has zero independent decision weight', () => {
   assert.equal(rusty.ruleId, notRusty.ruleId);
 });
 
-test('uncertain safety-critical answers fail conservatively', () => {
-  const headache = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { thunderclapOnset: null });
-  const fever = ClinicalRuleEngine.evaluate(Scenario.FEVER, { severeBreathingDifficulty: null });
-  assert.equal(headache.disposition, Disposition.CALL_911_NOW);
-  assert.equal(fever.disposition, Disposition.CALL_911_NOW);
+test('unsure answers do not trigger red flags and keep pathway going', () => {
+  const fever = ClinicalRuleEngine.evaluate(Scenario.FEVER, { severeBreathingDifficulty: null, feverDuration3DaysPlus: false });
+  assert.equal(fever.disposition, Disposition.HOME_MONITOR_WITH_SAFETY_NET);
+});
+
+test('fever duration 3+ days recommends family doctor unless overruled by red flags', () => {
+  const primaryCare = ClinicalRuleEngine.evaluate(Scenario.FEVER, { feverDuration3DaysPlus: true });
+  assert.equal(primaryCare.disposition, Disposition.SAME_DAY_CLINICAL_ASSESSMENT);
+  assert.equal(primaryCare.ruleId, 'FEVER-U01');
+
+  const overruledByRedFlag = ClinicalRuleEngine.evaluate(Scenario.FEVER, { feverDuration3DaysPlus: true, onChemotherapyOrNeutropenic: true });
+  assert.equal(overruledByRedFlag.disposition, Disposition.GO_TO_ED_NOW);
+  assert.equal(overruledByRedFlag.ruleId, 'FEVER-H01');
+});
+
+test('headache pathway routes blood thinners, cancer, and pregnancy to urgent care unless combined with red flags', () => {
+  const bloodThinnerAlone = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { anticoagulantUse: true });
+  assert.equal(bloodThinnerAlone.disposition, Disposition.SAME_DAY_CLINICAL_ASSESSMENT);
+  assert.equal(bloodThinnerAlone.ruleId, 'HEADACHE-U01');
+
+  const cancerAlone = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { immunocompromisedOrCancer: true });
+  assert.equal(cancerAlone.disposition, Disposition.SAME_DAY_CLINICAL_ASSESSMENT);
+  assert.equal(cancerAlone.ruleId, 'HEADACHE-U01');
+
+  const pregnancyAlone = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { pregnancyOrPostpartum: true });
+  assert.equal(pregnancyAlone.disposition, Disposition.SAME_DAY_CLINICAL_ASSESSMENT);
+  assert.equal(pregnancyAlone.ruleId, 'HEADACHE-U01');
+
+  const bloodThinnerPlusTrauma = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { anticoagulantUse: true, recentHeadTrauma: true });
+  assert.equal(bloodThinnerPlusTrauma.disposition, Disposition.GO_TO_ED_NOW);
+  assert.equal(bloodThinnerPlusTrauma.ruleId, 'HEADACHE-E02');
+
+  const bloodThinnerPlusVomiting = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { anticoagulantUse: true, persistentVomiting: true });
+  assert.equal(bloodThinnerPlusVomiting.disposition, Disposition.GO_TO_ED_NOW);
+  assert.equal(bloodThinnerPlusVomiting.ruleId, 'HEADACHE-E02');
 });
 
 test('intake handoff includes governance metadata and rejects identifiers', () => {
@@ -46,7 +76,7 @@ test('intake handoff includes governance metadata and rejects identifiers', () =
 });
 
 test('safety-surveillance language is flagged by Agent 3', () => {
-  const rule = ClinicalRuleEngine.evaluate(Scenario.FEVER, { durationDays: 1 });
+  const rule = ClinicalRuleEngine.evaluate(Scenario.FEVER, { feverDuration3DaysPlus: false });
   const result = FeedbackAgent.processPatientFeedback('s1', Scenario.FEVER, rule, {
     clarityScore: 5,
     trustScore: 4,
