@@ -36,6 +36,7 @@ const SEEDED_ENCOUNTERS = [
       confidenceScore: 5,
       canFollow: 'yes',
       accessBarrier: '',
+      culturallyRespectful: 'yes',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: '',
@@ -78,6 +79,7 @@ const SEEDED_ENCOUNTERS = [
       confidenceScore: 4,
       canFollow: 'yes',
       accessBarrier: '',
+      culturallyRespectful: 'yes',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: 'Was wondering if rust meant I automatically had tetanus.',
@@ -120,6 +122,7 @@ const SEEDED_ENCOUNTERS = [
       confidenceScore: 5,
       canFollow: 'yes',
       accessBarrier: '',
+      culturallyRespectful: 'mostly',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: '',
@@ -130,6 +133,11 @@ const SEEDED_ENCOUNTERS = [
       classifiedTheme: FeedbackTheme.GENERAL_POSITIVE,
       isSafetyConcern: false,
       feedbackStream: 'PATIENT_EXPERIENCE'
+    },
+    accessContext: {
+      community: 'smithers',
+      barrier: 'distance',
+      firstNationsServicesRequested: true
     },
     staffReview: {
       status: 'PENDING'
@@ -157,6 +165,7 @@ const SEEDED_ENCOUNTERS = [
       confidenceScore: 5,
       canFollow: 'maybe',
       accessBarrier: 'transportation',
+      culturallyRespectful: 'yes',
       isNextStepClear: true,
       knowsEscalation: true,
       confusingItems: 'None',
@@ -199,6 +208,7 @@ const SEEDED_ENCOUNTERS = [
       confidenceScore: 2,
       canFollow: 'maybe',
       accessBarrier: 'transportation',
+      culturallyRespectful: 'no',
       isNextStepClear: false,
       knowsEscalation: false,
       confusingItems: 'Felt a bit panicked by the urgent red box.',
@@ -341,6 +351,8 @@ export class SyntheticStore {
         avgTrust: '5.0',
         avgConfidence: '5.0',
         canFollowRate: 'N/A',
+        culturalRespectRate: 'N/A',
+        fnhaRequestCount: 0,
         staffAgreementRate: '100%',
         safetyConcernCount: 0,
         patientExperienceCount: 0,
@@ -386,6 +398,17 @@ export class SyntheticStore {
       ? `${Math.round((followable.length / feedbackEncounters.length) * 100)}%`
       : 'N/A';
 
+    const culturalFeedback = feedbackEncounters.filter(e =>
+      ['yes', 'mostly', 'no'].includes(e.patientFeedback.culturallyRespectful)
+    );
+    const culturallyRespectful = culturalFeedback.filter(e =>
+      ['yes', 'mostly'].includes(e.patientFeedback.culturallyRespectful)
+    );
+    const culturalRespectRate = culturalFeedback.length > 0
+      ? `${Math.round((culturallyRespectful.length / culturalFeedback.length) * 100)}%`
+      : 'N/A';
+    const fnhaRequestCount = encounters.filter(e => e.accessContext?.firstNationsServicesRequested === true).length;
+
     const reviewed = encounters.filter(e => e.staffReview && e.staffReview.status === 'COMPLETED');
     const agreed = reviewed.filter(e => e.staffReview.dispositionAppropriate === 'YES');
     const staffAgreementRate = reviewed.length > 0
@@ -419,6 +442,8 @@ export class SyntheticStore {
       avgTrust,
       avgConfidence,
       canFollowRate,
+      culturalRespectRate,
+      fnhaRequestCount,
       staffAgreementRate,
       safetyConcernCount,
       patientExperienceCount,

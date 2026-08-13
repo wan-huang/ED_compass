@@ -25,6 +25,7 @@ export class FeedbackAgent {
     const knowsEscalation = feedbackForm.knowsEscalation !== false;
     const canFollow = feedbackForm.canFollow || 'yes';
     const accessBarrier = feedbackForm.accessBarrier || '';
+    const culturallyRespectful = feedbackForm.culturallyRespectful || 'prefer_not_to_answer';
     const unsafeConcern = feedbackForm.unsafeConcern === true;
     const comments = feedbackForm.comments || '';
     const confusingItems = feedbackForm.confusingItems || '';
@@ -59,6 +60,7 @@ export class FeedbackAgent {
         knowsEscalation,
         canFollow,
         accessBarrier,
+        culturallyRespectful,
         unsafeConcern,
         confusingItems,
         comments,
