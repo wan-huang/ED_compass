@@ -24,6 +24,23 @@ const facilities = {
   ]
 };
 
+export const FNHA_VIRTUAL_DOCTOR = {
+  id: 'fnha-virtual-doctor',
+  name: 'First Nations Virtual Doctor of the Day',
+  type: 'Virtual Primary Care',
+  provider: 'First Nations Health Authority (FNHA)',
+  address: 'Province-wide in British Columbia',
+  distance: 'Phone or video',
+  capability: ['virtual', 'primary'],
+  firstNationsSpecific: true,
+  additionalSupport: true,
+  phone: '1-855-344-3800',
+  hours: 'Generally 8:30 a.m.–4:30 p.m. PT, 7 days/week',
+  eligibilityNotes: 'For First Nations people and their families living in BC, on or off reserve.',
+  suitabilityNotice: 'An additional primary-care option for non-emergency concerns. It does not replace 911, emergency care, or a required hands-on assessment.',
+  officialUrl: 'https://fnha.ca/services-and-support/access-and-support/health-and-virtual-services/virtual-doctor-of-the-day/'
+};
+
 export function requiresInPersonAssessment(scenario, disposition, answers = {}) {
   if ([Disposition.CALL_911_NOW, Disposition.GO_TO_ED_NOW].includes(disposition)) return true;
   if (scenario === Scenario.NAIL_PUNCTURE) {
@@ -34,7 +51,13 @@ export function requiresInPersonAssessment(scenario, disposition, answers = {}) 
   return false;
 }
 
-export function getCareOptions({ community = 'victoria', disposition, scenario, answers = {} }) {
+export function getCareOptions({
+  community = 'victoria',
+  disposition,
+  scenario,
+  answers = {},
+  firstNationsServicesRequested = false
+}) {
   const all = facilities[community] || facilities.victoria;
   let matches = [];
 
@@ -53,5 +76,18 @@ export function getCareOptions({ community = 'victoria', disposition, scenario, 
     matches = matches.filter(item => !item.capability.includes('virtual'));
   }
 
-  return matches.map((item, index) => ({ ...item, recommended: index === 0 }));
+  const routedOptions = matches.map((item, index) => ({ ...item, recommended: index === 0 }));
+
+  // This option is shown only after an explicit request. Geography is never
+  // used to infer First Nations identity or service preference, and the option
+  // can never replace emergency or hands-on care.
+  if (
+    firstNationsServicesRequested &&
+    ![Disposition.CALL_911_NOW, Disposition.GO_TO_ED_NOW].includes(disposition) &&
+    !requiresInPersonAssessment(scenario, disposition, answers)
+  ) {
+    routedOptions.push({ ...FNHA_VIRTUAL_DOCTOR, recommended: false });
+  }
+
+  return routedOptions;
 }
