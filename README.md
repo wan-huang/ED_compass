@@ -18,6 +18,8 @@ ED Compass complements—and does NOT replace—existing services such as **911*
 
 The prototype now begins with **“Tell us what is happening”** rather than requiring the patient to know which clinical pathway or healthcare service to choose. For the classroom demonstration, narrative keyword routing recognizes the three supported concerns and then hands the patient to the governed pathway.
 
+The prototype is explicitly scoped to **adults age 18 and older**. An entry check prevents the adult pathways from being presented as suitable for a child or youth.
+
 The live experience is designed to show:
 
 1. A patient or caregiver being heard in plain language.
@@ -30,8 +32,8 @@ The live experience is designed to show:
 
 The interface deliberately separates two audiences:
 
-* **Patient View** shows only the concern, safety questions, progress, care guidance, care-setting match and feedback. Rule IDs, structured JSON and agent handoffs are hidden.
-* **Presenter Console** provides one-click scenarios, decision provenance, agent collaboration, structured handoff inspection, the provider dashboard, governance queue, audit log and architecture.
+* **Patient View** shows only the concern, safety questions, progress, care guidance, care-setting match and feedback. Rule IDs, triage-framework references, structured JSON and agent handoffs are hidden.
+* **Presenter Console** provides one-click scenarios, decision provenance, clinical-framework teaching notes, agent collaboration, structured handoff inspection, the provider dashboard, governance queue, audit log and architecture.
 
 Each one-click scenario now includes an interactive four-stage decision walkthrough:
 
@@ -41,6 +43,8 @@ Each one-click scenario now includes an interactive four-stage decision walkthro
 4. **Feedback & Learning** — case-specific patient and provider feedback examples plus the governed capture → classify → review → test/approve loop.
 
 Patient-facing accessibility demonstrations include English/French switching, a larger/easier-to-read text option, browser speech-to-text for the concern narrative, and read-aloud controls for questions and the final plan. Voice input is progressive enhancement: typing remains available when browser speech recognition is unsupported or microphone permission is denied.
+
+The care-option form also offers an explicit, optional request for **First Nations-specific services**. If requested and clinically suitable, it adds the FNHA First Nations Virtual Doctor of the Day as an additional culturally safe option. The system never infers identity from geography, never places the service ahead of the governed route, and never offers it as a substitute for 911, emergency care, or a required hands-on wound assessment.
 
 > ⚠️ **ACADEMIC DISCLAIMER:** This software is an academic prototype built exclusively for the EMHI1001H course at the University of Toronto. It is **NOT** a production clinical system and must **NOT** be used to diagnose patients or make actual clinical decisions. All external handoffs display: `"Conceptual handoff only—no information has been transmitted."`
 
@@ -91,8 +95,9 @@ ED Compass implements three core clinical scenarios using the SAME three agents:
 * 🚫 **No Diagnostic Statements**: The system never diagnoses subarachnoid hemorrhage, stroke, or migraine; it reports warning signs requiring emergency evaluation.
 
 ### C. Fever & Systemic Infection (`FEVER-E01` .. `FEVER-L01`)
-* **Fact Intake**: Age group, infant status (<3 months), respiratory distress, mental status/confusion, stiff neck, dark purple non-blanching rash, chemotherapy/neutropenia, fluid intake ability, duration.
+* **Fact Intake**: Adult respiratory distress, mental status/confusion, stiff neck, dark purple non-blanching rash, chemotherapy/neutropenia, fluid intake ability, pregnancy, and duration.
 * 🛑 **No Patient-Entered Scoring**: Patients are never asked to calculate or self-report CTAS, qSOFA, or SIRS scores. High-risk hosts (e.g. chemotherapy) trigger escalation based on plain-language host risk.
+* **Framework boundary**: Presenter-only notes identify CTAS-informed urgency concepts and qSOFA/SIRS literature context. ED Compass does not calculate those tools or claim to reproduce formal triage.
 
 ---
 
@@ -109,7 +114,7 @@ ED Compass implements three core clinical scenarios using the SAME three agents:
 ## 5. Staff Dashboard & Governed Improvement Workflow
 
 ### Staff Review Dashboard (`/staff`)
-Includes real-time metrics (Total Completed, Emergency Rate, Avg Clarity Score, Staff Agreement Rate, Open Improvement Items), filterable encounter tables, detail modal drawer, patient fact logs, and audit trails.
+Includes real-time metrics (navigation, clarity, trust, feasibility, cultural respect, safety flags, explicit First Nations-service requests and staff agreement), filterable encounter tables, detail modal drawer, patient fact logs, and audit trails.
 
 ### Governed Improvement Items Tracker (`/improvements`)
 Proposals follow a strict governed lifecycle:
@@ -168,8 +173,10 @@ Together these verify:
 * Conservative handling of uncertain safety-critical answers
 * Emergency-department recommendations show EDs only—not 8-1-1 or virtual-care substitutes
 * Nail-puncture scenarios requiring a hands-on exam exclude virtual-only options
+* First Nations-specific services appear only after explicit opt-in and never override emergency or in-person routes
+* Adult-only entry gating prevents unsupported pediatric pathway use
 * French labels change presentation without changing canonical clinical facts
-* Technical handoffs are hidden from the patient view and visible in the presenter console
+* Technical handoffs and framework references are hidden from the patient view and visible in the presenter console
 
 ---
 
@@ -182,7 +189,7 @@ Open **Presenter Console** and use the four one-click scenario cards:
 3. **Demo C (Lower-Risk Fever)**: Click `Demo C`. Stable adult with 24h fever drinking fluids well. Demonstrates concise screening, home monitoring disposition, and safety-net triggers.
 4. **Demo D (High-Risk Fever)**: Click `Demo D`. Chemotherapy patient with fever. Demonstrates host-risk escalation to Emergency Department without prompting for CTAS/qSOFA scores.
 5. **Patient Experience**: Switch to Patient View to show that rule IDs and handoff JSON disappear. Demonstrate free-text concern entry, French, voice input/read-aloud, progress, and care-setting matching.
-6. **Safe Access Matching**: For an ED result, show that the recommended ED appears first in green and that 8-1-1/virtual care are not offered as alternatives. For a nail puncture requiring assessment, show the in-person warning.
+6. **Safe and culturally responsive access matching**: For an ED result, show that the recommended ED appears first in green and that 8-1-1/virtual care are not offered as alternatives. For a nail puncture requiring assessment, show the in-person warning. For a suitable lower-risk scenario, explicitly opt in to First Nations services and show the FNHA Virtual Doctor of the Day as an additional—not replacement—option.
 7. **Staff Dashboard Review**: Submit patient feedback, open the Learning Dashboard, review the new encounter, submit a provider review, and launch a QI Improvement Proposal.
 8. **Audit + Architecture Close**: Filter the Audit Log by the session ID, inspect rule provenance, then open Architecture to explain the patient, routing, learning and governance boundaries.
 
@@ -233,6 +240,8 @@ AG_ED-Compass/
 * **Local Browser Storage**: Classroom prototype uses local storage for synthetic data persistence; production deployment would connect to a secure cloud database.
 * **Narrative routing**: Classroom keyword routing supports only nail puncture, headache and fever. It is not a general-purpose symptom interpreter.
 * **Synthetic service options**: Clinic availability, opening hours and wait times are not verified or connected to a live service directory.
+* **First Nations service demonstration**: FNHA service information is presented only after explicit opt-in; eligibility and current hours must be confirmed with FNHA. Cultural safety requires co-design and evaluation with First Nations partners before any production use.
+* **Adult-only scope**: The current rule pathways are not configured or clinically validated for patients under age 18.
 * **Local demo provider**: Uses `LocalDemoAgentProvider` for a reliable offline classroom demonstration; no browser-exposed API key or runtime language model is required.
 * **Partial French demonstration**: The patient journey and questions are translated for the prototype; production use would require professional translation, clinical validation and ongoing terminology governance.
 * **Browser-dependent voice support**: Speech recognition availability and microphone permission vary by browser. Audio is handled by the browser and is not intentionally stored by the prototype.
