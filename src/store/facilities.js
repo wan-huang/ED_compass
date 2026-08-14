@@ -6,6 +6,11 @@ export const DEMO_COMMUNITIES = {
   smithers: { label: 'Smithers', region: 'Northern Health' }
 };
 
+export const DEMO_TIME_CONTEXTS = {
+  weekday: 'weekday',
+  afterHours: 'after-hours'
+};
+
 const facilities = {
   victoria: [
     { name: 'Royal Jubilee Hospital Emergency Department', type: 'Emergency Department', address: 'Victoria, BC', distance: '4 km', capability: ['emergency', 'wound', 'imaging'] },
@@ -49,6 +54,27 @@ export function requiresInPersonAssessment(scenario, disposition, answers = {}) 
     );
   }
   return false;
+}
+
+export function getCareAvailabilityAlerts({
+  community = 'victoria',
+  disposition,
+  timeContext = DEMO_TIME_CONTEXTS.weekday
+}) {
+  if ([Disposition.CALL_911_NOW, Disposition.GO_TO_ED_NOW].includes(disposition)) return [];
+
+  const all = facilities[community] || facilities.victoria;
+  const alerts = [];
+
+  if (!all.some(item => item.type === 'Urgent and Primary Care Centre')) {
+    alerts.push({ code: 'NO_UPCC_IN_COMMUNITY', severity: 'info' });
+  }
+
+  if (timeContext === DEMO_TIME_CONTEXTS.afterHours) {
+    alerts.push({ code: 'PRIMARY_CARE_AFTER_HOURS', severity: 'warning' });
+  }
+
+  return alerts;
 }
 
 export function getCareOptions({
