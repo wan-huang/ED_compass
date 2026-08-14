@@ -223,6 +223,7 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   assert.doesNotMatch(root.innerHTML, /CLINICAL TRIAGE GOVERNANCE/);
   assert.match(root.innerHTML, /Find an appropriate care option/);
   assert.match(root.innerHTML, /An in-person assessment is recommended/);
+  assert.match(root.innerHTML, /Weather or road conditions/);
 
   app.submitPatientFeedback({
     helpful: true,
@@ -232,7 +233,7 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
     isNextStepClear: true,
     knowsEscalation: true,
     canFollow: 'yes',
-    accessBarrier: '',
+    accessBarrier: 'weather',
     culturallyRespectful: 'yes',
     unsafeConcern: false,
     comments: 'Clear next step.',
@@ -242,6 +243,7 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
 
   const saved = SyntheticStore.getEncounters().find(e => e.sessionId === app.currentSession.sessionId);
   assert.equal(saved.patientFeedback.trustScore, 4);
+  assert.equal(saved.patientFeedback.accessBarrier, 'weather');
   assert.equal(saved.patientFeedback.culturallyRespectful, 'yes');
   assert.equal(saved.feedbackAnalysis.feedbackStream, 'PATIENT_EXPERIENCE');
 
