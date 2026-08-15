@@ -311,8 +311,10 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   app.showAccessOptions('smithers', 'distance', true, DEMO_TIME_CONTEXTS.afterHours);
   assert.match(root.innerHTML, /First Nations Virtual Doctor of the Day/);
   assert.match(root.innerHTML, /Additional culturally safe option/);
-  assert.match(root.innerHTML, /No UPCC is included/);
+  assert.match(root.innerHTML, /Care availability/);
+  assert.match(root.innerHTML, /No UPCC is available/);
   assert.match(root.innerHTML, /may be closed/);
+  assert.doesNotMatch(root.innerHTML, /Illustrative alert/);
   const accessEncounter = SyntheticStore.getEncounters().find(e => e.sessionId === app.currentSession.sessionId);
   assert.equal(accessEncounter.accessContext.firstNationsServicesRequested, true);
   assert.equal(accessEncounter.accessContext.community, 'smithers');
