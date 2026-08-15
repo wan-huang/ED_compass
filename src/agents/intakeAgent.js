@@ -235,6 +235,14 @@ export const INTAKE_QUESTIONS = {
   ]
 };
 
+export function isQuestionApplicable(question, answers = {}) {
+  if (question?.id !== 'newOrChangedHeadache') return true;
+
+  const reportedAge = answers.age;
+  if (reportedAge === undefined || reportedAge === null || reportedAge === 'unknown') return true;
+  return Number(reportedAge) >= 50;
+}
+
 export class IntakeAgent {
   /**
    * Initializes a new intake session.
@@ -264,9 +272,14 @@ export class IntakeAgent {
     const questionDef = scenarioQuestions.find(q => q.id === fieldId);
 
     const updatedAnswers = { ...sessionState.answers, [fieldId]: value };
-    const updatedUncertainties = isUnsure 
-      ? [...new Set([...sessionState.uncertainties, fieldId])] 
+    let updatedUncertainties = isUnsure
+      ? [...new Set([...sessionState.uncertainties, fieldId])]
       : sessionState.uncertainties.filter(id => id !== fieldId);
+
+    if (fieldId === 'age' && value !== 'unknown' && Number(value) < 50) {
+      delete updatedAnswers.newOrChangedHeadache;
+      updatedUncertainties = updatedUncertainties.filter(id => id !== 'newOrChangedHeadache');
+    }
 
     // Check emergency red flag condition.
     // "I'm not sure" (isUnsure) is NOT treated as a yes and keeps the pathway going.
@@ -278,7 +291,10 @@ export class IntakeAgent {
       emergencyTriggerField = fieldId;
     }
 
-    const nextIndex = sessionState.currentQuestionIndex + 1;
+    let nextIndex = sessionState.currentQuestionIndex + 1;
+    while (nextIndex < scenarioQuestions.length && !isQuestionApplicable(scenarioQuestions[nextIndex], updatedAnswers)) {
+      nextIndex += 1;
+    }
     const isCompleted = emergencyStopDetected || nextIndex >= scenarioQuestions.length;
 
     return {
@@ -298,6 +314,7 @@ export class IntakeAgent {
   static buildHandoff(sessionState) {
     const scenarioQuestions = INTAKE_QUESTIONS[sessionState.scenario] || [];
     const missingFields = scenarioQuestions
+      .filter(q => isQuestionApplicable(q, sessionState.answers))
       .filter(q => sessionState.answers[q.id] === undefined)
       .map(q => q.id);
 

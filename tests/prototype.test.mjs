@@ -5,7 +5,7 @@ import { ClinicalRuleEngine } from '../src/clinical/engine.js';
 import { Disposition, Scenario } from '../src/clinical/types.js';
 import { IntakeAgent } from '../src/agents/intakeAgent.js';
 import { FeedbackAgent } from '../src/agents/feedbackAgent.js';
-import { getCareOptions, requiresInPersonAssessment } from '../src/store/facilities.js';
+import { DEMO_TIME_CONTEXTS, getCareAvailabilityAlerts, getCareOptions, requiresInPersonAssessment } from '../src/store/facilities.js';
 import { t, questionLabel } from '../src/ui/i18n.js';
 
 test('rust has zero independent decision weight', () => {
@@ -60,6 +60,21 @@ test('headache pathway routes blood thinners, cancer, and pregnancy to urgent ca
   const bloodThinnerPlusVomiting = ClinicalRuleEngine.evaluate(Scenario.HEADACHE, { anticoagulantUse: true, persistentVomiting: true });
   assert.equal(bloodThinnerPlusVomiting.disposition, Disposition.GO_TO_ED_NOW);
   assert.equal(bloodThinnerPlusVomiting.ruleId, 'HEADACHE-E02');
+});
+
+test('headache intake skips the 50-plus follow-up after an under-50 answer', () => {
+  let session = IntakeAgent.createSession('headache-under-50', Scenario.HEADACHE, 'Headache');
+  session.answers.newOrChangedHeadache = true;
+  session.uncertainties.push('newOrChangedHeadache');
+  session.currentQuestionIndex = 10;
+  session = IntakeAgent.answerQuestion(session, 'age', '25');
+
+  assert.equal(session.isCompleted, true);
+  assert.equal(session.currentQuestionIndex, 12);
+  assert.equal(session.answers.newOrChangedHeadache, undefined);
+  assert.ok(!session.uncertainties.includes('newOrChangedHeadache'));
+  const handoff = IntakeAgent.buildHandoff(session);
+  assert.ok(!handoff.missingFields.includes('newOrChangedHeadache'));
 });
 
 test('intake handoff includes governance metadata and rejects identifiers', () => {
@@ -155,6 +170,29 @@ test('First Nations services require explicit opt-in and cannot override urgent 
     firstNationsServicesRequested: true
   });
   assert.ok(handsOnWound.every(option => option.id !== 'fnha-virtual-doctor'));
+});
+
+test('illustrative care alerts reflect community and selected time context', () => {
+  const smithers = getCareAvailabilityAlerts({
+    community: 'smithers',
+    disposition: Disposition.SAME_DAY_CLINICAL_ASSESSMENT,
+    timeContext: DEMO_TIME_CONTEXTS.weekday
+  });
+  assert.deepEqual(smithers.map(alert => alert.code), ['NO_UPCC_IN_COMMUNITY']);
+
+  const afterHours = getCareAvailabilityAlerts({
+    community: 'victoria',
+    disposition: Disposition.CONTACT_811_OR_PRIMARY_CARE,
+    timeContext: DEMO_TIME_CONTEXTS.afterHours
+  });
+  assert.deepEqual(afterHours.map(alert => alert.code), ['PRIMARY_CARE_AFTER_HOURS']);
+
+  const emergency = getCareAvailabilityAlerts({
+    community: 'smithers',
+    disposition: Disposition.GO_TO_ED_NOW,
+    timeContext: DEMO_TIME_CONTEXTS.afterHours
+  });
+  assert.equal(emergency.length, 0);
 });
 
 test('patient interface supports French labels without changing canonical facts', () => {
@@ -265,15 +303,20 @@ test('demo path reaches feedback, dashboard and staff review', async () => {
   assert.match(root.innerHTML, /Learning System Dashboard/);
   app.setTab('architecture');
   assert.match(root.innerHTML, /One front door, several safe care destinations/);
+  assert.match(root.innerHTML, /Access and trust layer/);
+  assert.match(root.innerHTML, /Community-aware options/);
 
   app.launchDemoCase('DEMO_C');
   app.setTab('patient');
-  app.showAccessOptions('smithers', 'distance', true);
+  app.showAccessOptions('smithers', 'distance', true, DEMO_TIME_CONTEXTS.afterHours);
   assert.match(root.innerHTML, /First Nations Virtual Doctor of the Day/);
   assert.match(root.innerHTML, /Additional culturally safe option/);
+  assert.match(root.innerHTML, /No UPCC is included/);
+  assert.match(root.innerHTML, /may be closed/);
   const accessEncounter = SyntheticStore.getEncounters().find(e => e.sessionId === app.currentSession.sessionId);
   assert.equal(accessEncounter.accessContext.firstNationsServicesRequested, true);
   assert.equal(accessEncounter.accessContext.community, 'smithers');
+  assert.equal(accessEncounter.accessContext.timeContext, DEMO_TIME_CONTEXTS.afterHours);
 
   app.launchDemoCase('DEMO_B');
   assert.equal(app.patientStep, 'emergency_stop');

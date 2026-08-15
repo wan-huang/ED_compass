@@ -4,14 +4,14 @@
  */
 
 import { getAgentProvider } from '../agents/providers/agentProvider.js';
-import { INTAKE_QUESTIONS } from '../agents/intakeAgent.js';
+import { INTAKE_QUESTIONS, isQuestionApplicable } from '../agents/intakeAgent.js';
 import { Scenario, Disposition, DISPOSITION_METADATA } from '../clinical/types.js';
 import { SyntheticStore } from '../store/syntheticStore.js';
 import { AuditLogger, AuditEventType } from '../store/auditLogger.js';
 import { DEMO_CASES } from '../store/demoCases.js';
 import { ImprovementStatus } from '../agents/types.js';
 import { t, questionLabel, optionLabel } from './i18n.js';
-import { DEMO_COMMUNITIES, getCareOptions, requiresInPersonAssessment } from '../store/facilities.js';
+import { DEMO_COMMUNITIES, DEMO_TIME_CONTEXTS, getCareAvailabilityAlerts, getCareOptions, requiresInPersonAssessment } from '../store/facilities.js';
 
 export class AppController {
   constructor(rootContainer) {
@@ -28,6 +28,7 @@ export class AppController {
     this.recognition = null;
     this.accessCommunity = 'victoria';
     this.accessBarrier = '';
+    this.accessTimeContext = DEMO_TIME_CONTEXTS.weekday;
     this.firstNationsServicesRequested = false;
     this.accessOptionsVisible = false;
     this.auditFilter = '';
@@ -135,14 +136,16 @@ export class AppController {
     window.speechSynthesis.speak(utterance);
   }
 
-  showAccessOptions(community, barrier, firstNationsServicesRequested = false) {
+  showAccessOptions(community, barrier, firstNationsServicesRequested = false, timeContext = DEMO_TIME_CONTEXTS.weekday) {
     this.accessCommunity = DEMO_COMMUNITIES[community] ? community : 'victoria';
     this.accessBarrier = barrier || '';
+    this.accessTimeContext = Object.values(DEMO_TIME_CONTEXTS).includes(timeContext) ? timeContext : DEMO_TIME_CONTEXTS.weekday;
     this.firstNationsServicesRequested = Boolean(firstNationsServicesRequested);
     this.accessOptionsVisible = true;
     AuditLogger.logEvent(AuditEventType.ACCESS_OPTIONS_DISPLAYED, this.currentSession?.sessionId || 'ACCESS', {
       community: this.accessCommunity,
       barrier: this.accessBarrier,
+      timeContext: this.accessTimeContext,
       firstNationsServicesRequested: this.firstNationsServicesRequested,
       disposition: this.currentRuleResult?.disposition
     }, 'Patient');
@@ -157,6 +160,7 @@ export class AppController {
       accessContext: {
         community: this.accessCommunity,
         barrier: this.accessBarrier,
+        timeContext: this.accessTimeContext,
         firstNationsServicesRequested: this.firstNationsServicesRequested
       }
     });
@@ -172,6 +176,7 @@ export class AppController {
     this.currentDemoId = null;
     this.accessOptionsVisible = false;
     this.firstNationsServicesRequested = false;
+    this.accessTimeContext = DEMO_TIME_CONTEXTS.weekday;
     this.voiceStatus = '';
     this.patientStep = 'consent';
     this.render();
@@ -239,6 +244,18 @@ export class AppController {
       this.patientStep = 'review';
     }
     
+    this.render();
+  }
+
+  goToPreviousQuestion() {
+    if (!this.currentSession) return;
+    const questions = INTAKE_QUESTIONS[this.currentSession.scenario] || [];
+    let previousIndex = this.currentSession.currentQuestionIndex - 1;
+    while (previousIndex > 0 && !isQuestionApplicable(questions[previousIndex], this.currentSession.answers)) {
+      previousIndex -= 1;
+    }
+    this.currentSession.currentQuestionIndex = Math.max(0, previousIndex);
+    this.currentSession.isCompleted = false;
     this.render();
   }
 
@@ -727,7 +744,7 @@ export class AppController {
 
         <div style="display: flex; justify-content: space-between; align-items: center;">
           ${idx > 0 ? `
-            <button class="btn btn-secondary" onclick="window.app.currentSession.currentQuestionIndex--; window.app.render();">
+            <button class="btn btn-secondary" onclick="window.app.goToPreviousQuestion();">
               ← ${t(this.locale, 'back')}
             </button>
           ` : '<div></div>'}
@@ -783,7 +800,8 @@ export class AppController {
   }
 
   renderReviewAnswers() {
-    const questions = INTAKE_QUESTIONS[this.currentSession.scenario] || [];
+    const questions = (INTAKE_QUESTIONS[this.currentSession.scenario] || [])
+      .filter(question => isQuestionApplicable(question, this.currentSession.answers));
     const answers = this.currentSession.answers;
 
     return `
@@ -995,6 +1013,11 @@ export class AppController {
       answers,
       firstNationsServicesRequested: this.firstNationsServicesRequested
     }) : [];
+    const availabilityAlerts = this.accessOptionsVisible ? getCareAvailabilityAlerts({
+      community: this.accessCommunity,
+      disposition,
+      timeContext: this.accessTimeContext
+    }) : [];
 
     return `
       <div class="card care-options-card">
@@ -1004,13 +1027,15 @@ export class AppController {
         </div>
         ${inPerson ? `<div class="in-person-notice"><strong>🏥 ${t(this.locale, 'inPersonNeeded')}</strong><span>${t(this.locale, 'virtualNotSuitable')}</span></div>` : ''}
         ${disposition === Disposition.GO_TO_ED_NOW ? `<p class="emergency-routing-note">${this.locale === 'fr' ? 'Seuls les services d’urgence sont affichés. Le 8-1-1 et les soins virtuels ne sont pas présentés comme solutions de remplacement.' : 'Only emergency departments are shown. 8-1-1 and virtual care are not presented as alternatives.'}</p>` : ''}
-        <form class="access-form" onsubmit="event.preventDefault(); window.app.showAccessOptions(this.community.value, this.barrier.value, this.firstNations.value === 'yes');">
+        <form class="access-form" onsubmit="event.preventDefault(); window.app.showAccessOptions(this.community.value, this.barrier.value, this.firstNations.value === 'yes', this.timeContext.value);">
           <label><span>${t(this.locale, 'location')}</span><select name="community" class="form-select">${Object.entries(DEMO_COMMUNITIES).map(([key, value]) => `<option value="${key}" ${this.accessCommunity === key ? 'selected' : ''}>${value.label} · ${value.region}</option>`).join('')}</select></label>
           <label><span>${t(this.locale, 'accessBarrier')}</span><select name="barrier" class="form-select"><option value="">${this.locale === 'fr' ? 'Aucun' : 'None'}</option><option value="transportation" ${this.accessBarrier === 'transportation' ? 'selected' : ''}>${this.locale === 'fr' ? 'Transport' : 'Transportation'}</option><option value="distance" ${this.accessBarrier === 'distance' ? 'selected' : ''}>${this.locale === 'fr' ? 'Distance' : 'Distance'}</option><option value="mobility" ${this.accessBarrier === 'mobility' ? 'selected' : ''}>${this.locale === 'fr' ? 'Mobilité' : 'Mobility or disability'}</option></select></label>
+          <label><span>${t(this.locale, 'timeContext')}</span><select name="timeContext" class="form-select"><option value="${DEMO_TIME_CONTEXTS.weekday}" ${this.accessTimeContext === DEMO_TIME_CONTEXTS.weekday ? 'selected' : ''}>${t(this.locale, 'weekdayTime')}</option><option value="${DEMO_TIME_CONTEXTS.afterHours}" ${this.accessTimeContext === DEMO_TIME_CONTEXTS.afterHours ? 'selected' : ''}>${t(this.locale, 'afterHoursTime')}</option></select></label>
           ${inPerson ? '<input type="hidden" name="firstNations" value="no" />' : `<label class="fnha-opt-in"><span>${t(this.locale, 'firstNationsHeading')}</span><small>${t(this.locale, 'firstNationsQuestion')}</small><select name="firstNations" class="form-select"><option value="no" ${!this.firstNationsServicesRequested ? 'selected' : ''}>${t(this.locale, 'firstNationsNo')}</option><option value="yes" ${this.firstNationsServicesRequested ? 'selected' : ''}>${t(this.locale, 'firstNationsYes')}</option></select></label>`}
           <button class="btn btn-primary" type="submit">${t(this.locale, 'viewOptions')}</button>
         </form>
         ${this.accessOptionsVisible ? `
+          ${availabilityAlerts.length ? `<div class="availability-alerts" role="status">${availabilityAlerts.map(alert => `<div class="availability-alert ${alert.severity}"><strong>${alert.severity === 'warning' ? '⏰' : 'ℹ️'} ${this.locale === 'fr' ? 'Alerte illustrative' : 'Illustrative alert'}</strong><span>${t(this.locale, alert.code === 'NO_UPCC_IN_COMMUNITY' ? 'noUpccAlert' : 'afterHoursAlert')}</span></div>`).join('')}</div>` : ''}
           <div class="matched-care-list">
             ${options.length ? options.map(option => `<div class="matched-care-card ${option.recommended ? 'recommended' : ''} ${option.firstNationsSpecific ? 'fnha-option' : ''}"><div class="matched-care-heading"><div><strong>${escapeHtml(option.name)}</strong><span>${escapeHtml(option.provider || option.type)}</span></div>${option.recommended ? `<span class="recommended-badge">✓ ${t(this.locale, 'recommendedMatch')}</span>` : option.additionalSupport ? `<span class="additional-support-badge">${t(this.locale, 'additionalSupport')}</span>` : ''}</div><div class="matched-care-meta"><span>📍 ${escapeHtml(option.address)}</span><span>↔ ${escapeHtml(option.distance)}</span></div>${option.firstNationsSpecific ? `<div class="fnha-details"><p><strong>${this.locale === 'fr' ? 'Téléphone' : 'Phone'}:</strong> ${escapeHtml(option.phone)}</p><p><strong>${this.locale === 'fr' ? 'Admissibilité' : 'Eligibility'}:</strong> ${escapeHtml(option.eligibilityNotes)}</p><p><strong>${this.locale === 'fr' ? 'Heures indicatives' : 'Typical hours'}:</strong> ${escapeHtml(option.hours)}</p><p>${escapeHtml(option.suitabilityNotice)}</p><a href="${escapeHtml(option.officialUrl)}" target="_blank" rel="noopener noreferrer">FNHA ${this.locale === 'fr' ? '— détails officiels' : 'official service details'} ↗</a><small>${t(this.locale, 'confirmServiceDetails')}</small></div>` : ''}</div>`).join('') : `<p>${this.locale === 'fr' ? 'Aucune option fictive ne correspond à ce choix.' : 'No synthetic option matches this selection.'}</p>`}
           </div>
@@ -1323,6 +1348,16 @@ export class AppController {
             <div class="lane-title"><span>Conceptual care-routing layer</span><small>No live information is transmitted</small></div>
             <div class="destination-grid">
               <div>Call 911 now</div><div>Emergency department</div><div>Same-day urgent care</div><div>8-1-1 / primary care</div><div>Home monitoring</div>
+            </div>
+          </section>
+
+          <section class="architecture-lane access-trust-lane">
+            <div class="lane-title"><span>Access and trust layer</span><small>Accessible · community-aware · culturally safe</small></div>
+            <div class="access-trust-grid">
+              <div class="access-trust-node"><b>Voice and language access</b><small>Free text, speech input, read-aloud, English/French and larger text</small></div>
+              <div class="access-trust-node"><b>Community-aware options</b><small>Selected community, access barriers and illustrative service alerts shape navigation</small></div>
+              <div class="access-trust-node"><b>Choice and cultural safety</b><small>First Nations-specific services appear only after explicit opt-in</small></div>
+              <div class="access-trust-node"><b>Transparent feedback</b><small>Patients and providers inform human-reviewed, versioned improvement</small></div>
             </div>
           </section>
 
